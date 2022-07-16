@@ -1,0 +1,10 @@
+{
+    "salmon_version": "0.10.0",
+    "index": "/users/lboukas/pub/salmon/salmon-0.10.0_linux_x86_64/bin/mouse_index",
+    "libType": "A",
+    "mates1": "721-2_S16_L001_R1_001.fastq.gz",
+    "mates2": "721-2_S16_L001_R2_001.fastq.gz",
+    "threads": "8",
+    "output": "quants/721-2_S16_L001",
+    "auxDir": "aux_info"
+}

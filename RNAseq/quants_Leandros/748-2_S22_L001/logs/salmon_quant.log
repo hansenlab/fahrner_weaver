@@ -1,0 +1,43 @@
+[2021-11-06 00:46:28.150] [jointLog] [info] Fragment incompatibility prior below threshold.  Incompatible fragments will be ignored.
+[2021-11-06 00:46:28.150] [jointLog] [info] parsing read library format
+[2021-11-06 00:46:28.150] [jointLog] [info] There is 1 library.
+[2021-11-06 00:46:28.389] [jointLog] [info] Loading Quasi index
+[2021-11-06 00:46:28.390] [jointLog] [info] Loading 32-bit quasi index
+[2021-11-06 00:46:39.289] [jointLog] [info] done
+[2021-11-06 00:46:39.289] [jointLog] [info] Index contained 105833 targets
+[2021-11-06 00:46:41.596] [jointLog] [info] Automatically detected most likely library type as IU
+[2021-11-06 01:00:47.455] [jointLog] [info] Thread saw mini-batch with a maximum of 0.42% zero probability fragments
+[2021-11-06 01:00:47.455] [jointLog] [info] Thread saw mini-batch with a maximum of 0.46% zero probability fragments
+[2021-11-06 01:00:47.485] [jointLog] [info] Thread saw mini-batch with a maximum of 0.46% zero probability fragments
+[2021-11-06 01:00:47.494] [jointLog] [info] Thread saw mini-batch with a maximum of 0.50% zero probability fragments
+[2021-11-06 01:00:47.624] [jointLog] [info] Thread saw mini-batch with a maximum of 0.50% zero probability fragments
+[2021-11-06 01:00:47.711] [jointLog] [info] Thread saw mini-batch with a maximum of 0.52% zero probability fragments
+[2021-11-06 01:00:47.763] [jointLog] [info] Thread saw mini-batch with a maximum of 0.48% zero probability fragments
+[2021-11-06 01:00:47.792] [jointLog] [info] Thread saw mini-batch with a maximum of 0.50% zero probability fragments
+[2021-11-06 01:00:48.151] [jointLog] [info] Computed 158095 rich equivalence classes for further processing
+[2021-11-06 01:00:48.151] [jointLog] [info] Counted 23096846 total reads in the equivalence classes 
+[2021-11-06 01:00:48.160] [jointLog] [info] Mapping rate = 89.5195%
+
+[2021-11-06 01:00:48.160] [jointLog] [info] finished quantifyLibrary()
+[2021-11-06 01:00:48.283] [jointLog] [info] Starting optimizer
+[2021-11-06 01:00:48.444] [jointLog] [info] Marked 0 weighted equivalence classes as degenerate
+[2021-11-06 01:00:48.495] [jointLog] [info] iteration = 0 | max rel diff. = 109.871
+[2021-11-06 01:00:48.152] [fileLog] [info] 
+At end of round 0
+==================
+Observed 25800917 total fragments (25800917 in most recent round)
+
+[2021-11-06 01:00:53.105] [jointLog] [info] iteration = 100 | max rel diff. = 0.141421
+[2021-11-06 01:00:57.785] [jointLog] [info] iteration = 200 | max rel diff. = 0.0522569
+[2021-11-06 01:01:02.480] [jointLog] [info] iteration = 300 | max rel diff. = 0.0911318
+[2021-11-06 01:01:07.107] [jointLog] [info] iteration = 400 | max rel diff. = 0.0301708
+[2021-11-06 01:01:11.734] [jointLog] [info] iteration = 500 | max rel diff. = 0.0289562
+[2021-11-06 01:01:16.277] [jointLog] [info] iteration = 600 | max rel diff. = 0.017868
+[2021-11-06 01:01:20.925] [jointLog] [info] iteration = 700 | max rel diff. = 0.015414
+[2021-11-06 01:01:25.605] [jointLog] [info] iteration = 800 | max rel diff. = 0.013858
+[2021-11-06 01:01:30.238] [jointLog] [info] iteration = 900 | max rel diff. = 0.0137355
+[2021-11-06 01:01:35.015] [jointLog] [info] iteration = 1000 | max rel diff. = 0.0110958
+[2021-11-06 01:01:36.546] [jointLog] [info] iteration = 1033 | max rel diff. = 0.00972814
+[2021-11-06 01:01:36.567] [jointLog] [info] Finished optimizer
+[2021-11-06 01:01:36.567] [jointLog] [info] writing output 
+

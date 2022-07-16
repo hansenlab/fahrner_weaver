@@ -1,0 +1,12 @@
+{
+    "salmon_version": "1.9.0",
+    "index": "GRCm38_cdna_index",
+    "libType": "A",
+    "mates1": "705-2_S12_L001_R1_001.fastq.gz",
+    "mates2": "705-2_S12_L001_R2_001.fastq.gz",
+    "threads": "8",
+    "validateMappings": [],
+    "gcBias": [],
+    "output": "quants_Christine/705-2_S12_quant",
+    "auxDir": "aux_info"
+}
