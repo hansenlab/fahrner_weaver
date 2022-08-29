@@ -31,10 +31,20 @@ rm(dds)
 load(file='dds_Christine-quant-Leandros-code.rda')
 dds_CqLc <- dds
 rm(dds)
+load(file='dds_Frankenstein.rda')
+dds_Frankenstein <- dds
+load(file="dds_L-import.rda")
+dds_L.import <- dds
+load(file="dds_CWG-import.rda")
+dds_CWG.import <- dds
+rm(dds)
 res_CqCc <- results(dds_CqCc)
 res_LqCc <- results(dds_LqCc)
 res_LqLc <- results(dds_LqLc)
 res_CqLc <- results(dds_CqLc)
+res_Frankenstein <- results(dds_Frankenstein)
+res_L.import <- results(dds_L.import)
+res_CWG.import <- results(dds_CWG.import)
 
 # log2FC scatter plots for LqLc vs CqLc 
 png(filename = 'LqLc_CqLc_all_col.png', width=700, height=700)
@@ -215,6 +225,30 @@ plot(LqCc_CqCc_fil$log2FoldChange.LqCc, LqCc_CqCc_fil$log2FoldChange.CqCc,
      xlim=c(-8,3), ylim=c(-8,3),
      xlab='log2FC, LqCc', ylab='log2FC, CqCc', main='LqCc vs CqCc, exp filtered > 100')
 abline(a=0, b=1, col='gray', lty=2)
+abline(h=0)
+abline(v=0)
+dev.off()
+
+# log2FC scatter plots for LqLc vs Frankenstein
+png(filename = 'LqLc_Frankenstein_all.png', width=700, height=700)
+LqLc_Frankenstein <- merge(as.data.frame(res_LqLc), as.data.frame(res_Frankenstein), by="row.names", suffixes=c('.LqLc','.Frankenstein'))
+plot(LqLc_Frankenstein$log2FoldChange.LqLc, LqLc_Frankenstein$log2FoldChange.Frankenstein,
+     pch=19, cex=0.5,
+     xlim=c(-6,3), ylim=c(-6,3),
+     xlab='log2FC, LqLc', ylab='log2FC, Frankenstein', main='LqLc vs Frankenstein, all genes')
+abline(a=0, b=1, col='red', lty=2)
+abline(h=0)
+abline(v=0)
+dev.off()
+
+# log2FC scatter plots for testing import methods
+png(filename = 'import_Frankenstein_all.png', width=700, height=700)
+import_Frankenstein <- merge(as.data.frame(res_L.import), as.data.frame(res_CWG.import), by="row.names", suffixes=c('.L.import','.CWG.import'))
+plot(import_Frankenstein$log2FoldChange.L.import, import_Frankenstein$log2FoldChange.CWG.import,
+     pch=19, cex=0.5,
+     xlim=c(-6,3), ylim=c(-6,3),
+     xlab='log2FC, L.import', ylab='log2FC, CWG.import', main='import Frankenstein, all genes')
+abline(a=0, b=1, col='red', lty=2)
 abline(h=0)
 abline(v=0)
 dev.off()
