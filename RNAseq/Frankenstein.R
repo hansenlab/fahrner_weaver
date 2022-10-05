@@ -14,46 +14,57 @@ library(limma)
 library(statmod)
 library(tidyverse)
 
-# ### BEGIN LEANDROS' IMPORT 
+### BEGIN LEANDROS' IMPORT
 # files <- paste0("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/quants_Leandros/",
 #                 list.files("quants_Leandros"), "/quant.sf")
-# 
-# # files <- paste0("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/quants_Christine/", 
-# #                 list.files("quants_Christine"), "/quant.sf")
-# 
-# names(files) <- c("mut_1-1", "mut_1-2", 
-#                   "wt_1-1", "wt_1-2", 
-#                   "mut_2-1", "mut_2-2",
-#                   "mut_3-1", "mut_3-2",
-#                   "wt_2-1", "wt_2-2",
-#                   "wt_3-1", "wt_3-2",
-#                   "wt_4-1", "wt_4-2",
-#                   "mut_4-1", "mut_4-2",
-#                   "mut_5-1", "mut_5-2",
-#                   "wt_5-1", "wt_5-2",
-#                   "mut_6-1", "mut_6-2")
-# 
-# # creates dataframe w/ tx ID and corresponding gene ID
+
+files <- paste0("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/quants_Christine/",
+                list.files("quants_Christine"), "/quant.sf")
+
+names(files) <- c("mut_1-1", "mut_1-2",
+                  "wt_1-1", "wt_1-2",
+                  "mut_2-1", "mut_2-2",
+                  "mut_3-1", "mut_3-2",
+                  "wt_2-1", "wt_2-2",
+                  "wt_3-1", "wt_3-2",
+                  "wt_4-1", "wt_4-2",
+                  "mut_4-1", "mut_4-2",
+                  "mut_5-1", "mut_5-2",
+                  "wt_5-1", "wt_5-2",
+                  "mut_6-1", "mut_6-2")
+
+# creates dataframe w/ tx ID and corresponding gene ID
 # txdb <- TxDb.Mmusculus.UCSC.mm10.ensGene
 # k <- keys(txdb, keytype = "GENEID")
 # df <- AnnotationDbi::select(txdb, keys = k, keytype = "GENEID", columns = "TXNAME")
-# tx2gene <- df[, 2:1] 
-# 
-# # imports tx counts from quant files and match to genes using tx2gene. 
-# txi <- tximport(files, type = "salmon", tx2gene = tx2gene, 
-#                 countsFromAbundance = "lengthScaledTPM", ignoreTxVersion = TRUE)
-# 
-# samples <- read.csv(file='RNAseq-samples.csv')
-# sampleTable <- data.frame(condition=factor(samples$Genotype))
-# dds <- DESeqDataSetFromMatrix(round(txi$counts), sampleTable, design = ~condition)
-# ### END LEANDROS' IMPORT 
+
+EnsDb102 <- retrieveDb(se)
+k <- keys(EnsDb102, keytype = "GENEID")
+df <- AnnotationDbi::select(EnsDb102, keys = k, keytype = "GENEID", columns = "TXNAME")
+EnsDb102_tx <- transcriptsBy(EnsDb102, by="gene")
+EnsDb102_tx$ENSMUSG00000027358
+
+EnsDb89 <- retrieveDb(se)
+EnsDb89_tx <- transcriptsBy(EnsDb89, by="gene")
+EnsDb89_tx$ENSMUSG00000027358
+
+tx2gene <- df[, 2:1]
+
+# imports tx counts from quant files and match to genes using tx2gene.
+txi <- tximport(files, type = "salmon", tx2gene = tx2gene,
+                countsFromAbundance = "lengthScaledTPM", ignoreTxVersion = TRUE)
+
+samples <- read.csv(file='RNAseq-samples.csv')
+sampleTable <- data.frame(condition=factor(samples$Genotype))
+dds <- DESeqDataSetFromMatrix(round(txi$counts), sampleTable, design = ~condition)
+### END LEANDROS' IMPORT
 
 
 ### BEGIN CHRISTINE'S IMPORT
 samples <- read.csv('RNAseq-samples.csv')
 
-# dir <- '~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/quants_Christine'
-# files <- file.path(dir, paste(samples$Sample.ID, '_quant', sep=''), 'quant.sf')
+dir <- '~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/quants_Christine'
+files <- file.path(dir, paste(samples$Sample.ID, '_quant', sep=''), 'quant.sf')
 
 dir <- '~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/quants_Leandros'
 files <- file.path(dir, paste(samples$Sample.ID, '_L001', sep=''), 'quant.sf')
@@ -80,7 +91,7 @@ plot + geom_label_repel(aes(label=gsub("-.*", "", colnames(dds))), show.legend =
 # collapse technical replicates
 dds$sample <- factor(gsub("-.*", "", colnames(dds)))
 dds.coll <- collapseReplicates(dds, dds$sample)
-stopifnot(all(rowSums(counts(dds[,which(dds$sample=="705")])) == counts(dds.coll[,1])))
+stopifnot(all(rowSums(counts(dds[,which(dds$sample=="mut_1")])) == counts(dds.coll[,1])))
 dds.coll.counts <- counts(dds.coll)
 
 # filter genes with low median counts
@@ -108,7 +119,7 @@ design(ddssva) <- formula(~SV1 + SV2 + condition)
 # DESeq2 call
 ddssva <- DESeq(ddssva)
 dds <- ddssva
-save(dds, file='dds_CWG-import.rda')
+save(dds, file='dds_L-import_Cq_EnsDb102.rda')
 res <- results(dds)
 
 diffexp.subset <- as.data.frame(res[which(res$padj <0.1),])
@@ -168,4 +179,4 @@ diffexp.subset$ensembl_gene_id <- ensembl.id
 diffexp.subset <- merge(diffexp.subset, mgi, by='ensembl_gene_id')
 diffexp.subset <- diffexp.subset[order(diffexp.subset$log2FoldChange, decreasing=TRUE),]
 # write.csv(diffexp.subset, file="Leandros-quant-Leandros-code.csv")
-write.csv(diffexp.subset, file="CWG-import.csv")
+write.csv(diffexp.subset, file="CWG-import_Cq.csv")

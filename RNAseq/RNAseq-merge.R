@@ -37,6 +37,12 @@ load(file="dds_L-import.rda")
 dds_L.import <- dds
 load(file="dds_CWG-import.rda")
 dds_CWG.import <- dds
+load(file="dds_L-import_Cq.rda")
+dds_L.import_Cq <- dds
+load(file="dds_CWG-import_Cq.rda")
+dds_CWG.import_Cq <- dds
+load(file="dds_L-import_Cq_EnsDb102.rda")
+dds_L.import_Cq_EnsDb102 <- dds
 rm(dds)
 res_CqCc <- results(dds_CqCc)
 res_LqCc <- results(dds_LqCc)
@@ -45,6 +51,9 @@ res_CqLc <- results(dds_CqLc)
 res_Frankenstein <- results(dds_Frankenstein)
 res_L.import <- results(dds_L.import)
 res_CWG.import <- results(dds_CWG.import)
+res_L.import_Cq <- results(dds_L.import_Cq)
+res_CWG.import_Cq <- results(dds_CWG.import_Cq)
+res_L.import_Cq_EnsDb102 <- results(dds_L.import_Cq_EnsDb102)
 
 # log2FC scatter plots for LqLc vs CqLc 
 png(filename = 'LqLc_CqLc_all_col.png', width=700, height=700)
@@ -248,6 +257,28 @@ plot(import_Frankenstein$log2FoldChange.L.import, import_Frankenstein$log2FoldCh
      pch=19, cex=0.5,
      xlim=c(-6,3), ylim=c(-6,3),
      xlab='log2FC, L.import', ylab='log2FC, CWG.import', main='import Frankenstein, all genes')
+abline(a=0, b=1, col='red', lty=2)
+abline(h=0)
+abline(v=0)
+dev.off()
+
+png(filename = 'import_Frankenstein_all_Cq.png', width=700, height=700)
+import_Frankenstein_Cq <- merge(as.data.frame(res_L.import_Cq), as.data.frame(res_CWG.import_Cq), by="row.names", suffixes=c('.L.import_Cq','.CWG.import_Cq'))
+plot(import_Frankenstein_Cq$log2FoldChange.L.import_Cq, import_Frankenstein_Cq$log2FoldChange.CWG.import_Cq,
+     pch=19, cex=0.5,
+     xlim=c(-8,3), ylim=c(-8,3),
+     xlab='log2FC, L.import_Cq', ylab='log2FC, CWG.import_Cq', main='import Frankenstein, Cq, all genes')
+abline(a=0, b=1, col='red', lty=2)
+abline(h=0)
+abline(v=0)
+dev.off()
+
+png(filename = 'import_Frankenstein_all_Cq_EnsDb102.png', width=700, height=700)
+import_Frankenstein_Cq_EnsDb102 <- merge(as.data.frame(res_CWG.import_Cq), as.data.frame(res_L.import_Cq_EnsDb102), by="row.names", suffixes=c('.CWG.import_Cq','.L.import_Cq_EnsDb102'))
+plot(import_Frankenstein_Cq_EnsDb102$log2FoldChange.CWG.import_Cq, import_Frankenstein_Cq_EnsDb102$log2FoldChange.L.import_Cq_EnsDb102,
+     pch=19, cex=0.5, 
+     xlim=c(-8,3), ylim=c(-8,3),
+     xlab='log2FC, CWG.import_Cq', ylab='log2FC, L.import_Cq_EnsDb102', main='import Frankenstein, Cq, EnsDb102, all genes')
 abline(a=0, b=1, col='red', lty=2)
 abline(h=0)
 abline(v=0)
