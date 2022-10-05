@@ -1,0 +1,31 @@
+salmon 1.9.0
+Start time: Wed Sep 28 09:23:54 EDT 2022
+Building index
+Threads = 8
+Vertex length = 31
+Hash functions = 5
+Filter size = 68719476736
+Capacity = 2
+Files: 
+GRCm38_cdna_index_decoy-aware/ref_k31_fixed.fa
+--------------------------------------------------------------------------------
+Round 0, 0:68719476736
+Pass	Filling	Filtering
+1	562	737	
+2	153	6
+True junctions count = 14877511
+False junctions count = 2177322
+Hash table size = 17054833
+Candidate marks count = 337749810
+--------------------------------------------------------------------------------
+Reallocating bifurcations time: 14
+True marks count: 335240985
+Edges construction time: 187
+--------------------------------------------------------------------------------
+Distinct junctions = 14877511
+
+for info, total work write each  : 2.331    total work inram from level 3 : 4.322  total work raw : 25.000 
+Bitarray     11920350400  bits (100.00 %)   (array + ranks )
+final hash        305088  bits (0.00 %) (nb in final hash 908)
+Mapping reads
+End time: Wed Sep 28 13:17:24 EDT 2022
