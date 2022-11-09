@@ -1,2 +1,9 @@
 extdata
-RNAseq/final_analysis/ref/
+ref/
+BigStuff/
+temp/
+../.DS_Store
+../.RData
+../.Rapp.history
+../.Rhistory
+
