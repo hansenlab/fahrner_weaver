@@ -1,0 +1,330 @@
+---
+title: "Untreated"
+author: "Christine Gao"
+date: "4/4/2023"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+library(tripack)
+library(EnsDb.Mmusculus.v79)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(dplyr)
+library(scales)
+```
+
+Function for retrieving Ensembl IDs, given a vector of gene names. Returns a dataframe of successfully-retrieved gene names and corresponding Ensembl IDs. <i>**Genes for which an Ensembl ID could not be found are left out.</i>
+```{r}
+get.ensembl <- function(x) {
+  edb_mouse <- EnsDb.Mmusculus.v79
+  proms_mouse <- promoters(edb_mouse, 
+                           filter = TxBiotypeFilter("protein_coding"), 
+                           upstream = 2000, 
+                           downstream = 2000, 
+                           columns = c("gene_name", "tx_id", "gene_id"))
+  genome(seqinfo(proms_mouse)) <- "mm10"
+  seqlevelsStyle(proms_mouse) <- "ucsc"
+  proms_mouse <- proms_mouse[which(seqnames(proms_mouse) %in% seqnames(Mmusculus)[1:21])]
+  proms_mouse$gene_name <- toupper(proms_mouse$gene_name)
+
+  x <- toupper(x)
+  x <- unique(x)
+  ensembl.ids <- as.data.frame(
+    unique(proms_mouse[which(proms_mouse$gene_name %in% x), c('gene_name','gene_id')]),
+    row.names=NULL)
+  ensembl.ids <- ensembl.ids[, c('gene_name','gene_id')] %>% distinct()
+  return(ensembl.ids)
+}
+```
+
+Function for retrieving gene names, given a vector of Ensembl IDs. Returns a dataframe containing both Ensembl IDs and corresponding genes. <i>**Leaves out Ensembl IDs for which a gene name could not be found.</i>
+```{r}
+get.gene <- function(x){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol'),
+               filters='ensembl_gene_id',
+               values=x,
+               mart=ensembl102.mmusculus)
+  genes <- data.frame(ensembl_gene_id=x)
+  genes <- merge(genes, mgi, by='ensembl_gene_id')
+  return(genes)
+}
+```
+
+Function for annotating genes by Ensembl ID. Retrieves the Ensembl gene ID, MGI symbol, and MGI description.
+```{r}
+ensembl.annotate <- function(ensembl.id){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol','mgi_description'),
+               filters='ensembl_gene_id',
+               values=ensembl.id,
+               mart=ensembl102.mmusculus)
+  return(mgi)
+}
+```
+
+Function for making volcano plots. 
+```{r}
+makeVolcanoPlot <- function(DEgenes_df, lfc_cutoff, fdr, gene_ids, circ_ids, circ_names, ylim, color){
+  tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
+  rownames(tab) <- rownames(DEgenes_df)
+  par(mar=c(5,5,5,5))
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.5, 
+       xlab = expression(log[2]~fold~change),
+       ylab = expression(-log[10]~pvalue), 
+       cex.axis=1.5,
+       cex.lab=1.5,
+       col = "gray60", bty = 'l', 
+       xlim = c(min(tab$logFC), max(tab$logFC)), 
+       ylim = c(0, ylim))
+  points(tab[gene_ids, ], pch = 19, cex = 0.5, col = color)
+  # points(tab[circ_ids, ], pch = 1, cex = 1.5, col= 'black')
+
+  text(tab[circ_ids, ]$logFC-0.15, tab[circ_ids, ]$negLogPval, 
+       labels=circ_names, adj=1, cex = 0.5, col='black')
+ 
+  abline(h=-log10(fdr), col='red', lty=2, lwd=2)
+
+  if (lfc_cutoff != "none"){
+    abline(v = c(-lfc_cutoff, lfc_cutoff), col = rgb(0,0,0,0.75), lty = "longdash", lwd = 1) 
+  }
+}
+```
+
+Function for making Wilcoxon rank sum test stat histograms.
+```{r}
+wilcox.hist <- function(permutation, rank, pval, title, color){
+  hist(permutation, col = "gray60", lty = 0, 
+       breaks = 100, freq = FALSE, xlab = "Wilcoxon rank-sum test stat", cex.lab = 1.2, yaxt = 'n',
+       main = title,
+       cex.main = 1.2, font.main = 1, 
+       xlim = c(rank-50000, max(permutation)+0.05), xaxt = 'n')
+  axis(1, at = c(round(quantile(permutation, c(0.01, 0.99)))), cex.axis = 1.1)
+  axis(2, at = c(0, 0.000008), cex.axis = 1.1)
+  abline(v = rank, col = color, lwd = 3)
+  text(rank+10000, 0.000007,paste('p =', pval), adj=0, col = color)
+  legend <- legend("topright", legend = c("random", "observed"), 
+                   col = c("gray60", color), bty = 'n', 
+                   cex = 1, lty = "solid", lwd = 3)
+}
+```
+
+Final RNAseq analysis code using DESeq2. <i>If no intermediate objects are needed, just load the `dds` object in the next code chunk.</i>
+```{r results='hide', message=FALSE, warning=FALSE}
+setwd('~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/')
+samples <- read.csv('RNAseq-samples.csv')
+
+dir <- '~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/quants_final'
+files <- file.path(dir, paste(samples$Sample.ID, '_quant', sep=''), 'quant.sf')
+
+file.exists(files)
+coldata <- data.frame(files, names=samples$Sample.ID, condition=samples$Genotype, 
+                      stringsAsFactors = FALSE)
+
+# import transcript abundances
+se <- tximeta(coldata)
+
+# summarize abundances to gene level
+gse <- summarizeToGene(se)
+
+# load SummarizedExperiment into DESeqDataSet
+dds <- DESeqDataSet(gse, design=~condition)
+### END IMPORT
+
+
+### BEGIN ANALYSIS 
+# plot <- plotPCA(vst(dds))
+# plot + geom_label_repel(aes(label=gsub("-.*", "", colnames(dds))), show.legend = FALSE)
+
+# collapse technical replicates
+dds$sample <- factor(gsub("-.*", "", colnames(dds)))
+dds.coll <- collapseReplicates(dds, dds$sample)
+stopifnot(all(rowSums(counts(dds[,which(dds$sample=="705")])) == counts(dds.coll[,1])))
+dds.coll.counts <- counts(dds.coll)
+
+# filter genes with low median counts
+keep <- rowMedians(counts(dds.coll)) > 10
+dds.coll.filtered <- dds.coll[keep,]
+save(dds.coll.filtered, file='BigStuff/dds.coll.filtered_untreated.rda')
+
+# plot <- plotPCA(vst(dds.coll.filtered))
+# plot + geom_label_repel(aes(label=gsub("-.*", "", colnames(dds.coll.filtered))), show.legend = FALSE)
+
+# find surrogate variables for batch effects using sva
+dds.coll.filtered$condition <- relevel(dds.coll.filtered$condition, ref="WT")
+dds.coll.filtered.counts <- counts(dds.coll.filtered)
+mod <- model.matrix(~condition, colData(dds.coll.filtered))
+mod0 <- model.matrix(~1, colData(dds.coll.filtered))
+svseq <- svaseq(dds.coll.filtered.counts, mod, mod0)
+
+# append surrogate variables
+ddssva <- dds.coll.filtered
+ddssva$SV1 <- svseq$sv[,1]
+ddssva$SV2 <- svseq$sv[,2]
+design(ddssva) <- formula(~SV1 + SV2 + condition)
+
+# DESeq2 call
+ddssva <- DESeq(ddssva)
+dds <- ddssva
+# save(dds, file='dds_final.rda')
+res <- results(dds)
+```
+
+Load the `dds` object for the WS untreated (D14) RNAseq.
+```{r}
+load(file='/Users/greiderlab/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff/dds_final.rda')
+```
+
+P-value histogram prior to false discovery rate control.
+```{r}
+# setEPS()
+# postscript('plots_final/pval-hist_untreated.eps', width=9, height=5)
+hist(res$pvalue, freq=FALSE, breaks = 40, 
+     ylim = c(0, 3), col = 'gray60', 
+     xlab = "p-values", main = "R684C/+ vs. +/+", 
+     font.main = 1, cex.axis=1, cex.lab=1)
+# dev.off()
+```
+
+Attempt at making a density plot.
+```{r}
+# setEPS()
+# postscript(file='plots_final/density_pval-untreated.eps', width=2.1, height=1.7)
+par(mar=c(1.35,1.1,0.5,0), mgp=c(0.5,0.075,0))
+plot(density(res$pvalue, from=0.01,to=0.97, bw=0.025), 
+     asp=1, lwd=2, main='', bty='n', yaxt='n', xaxt='n', ylab='', xlab='')
+axis(1, at=c(0,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(.75,1.45), tck=-0.02, cex.axis=0.7, pos=-0.02)
+mtext('p-values', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+# dev.off()
+```
+
+Sample PCA after filtering genes with low median expression. 705 and 719 do not cluster with the other mutants.
+```{r results='hide', message=FALSE, warning=FALSE}
+# setEPS()
+# postscript('plots_final/pca_untreated.eps')
+plot <- plotPCA(vst(dds.coll.filtered), returnData=TRUE)
+# plot + geom_label_repel(aes(label=gsub("-.*", "", colnames(dds.coll.filtered))), show.legend = FALSE)
+
+plot$group <- relevel(plot$group, ref='WT')
+group.colors <- c('#0F80FF','#FB0207')
+# setEPS()
+# postscript('plots_final/pca_untreated.eps', width=2.15, height=1.57)
+ggplot(data = plot, aes(x = PC1, y = PC2, color=group)) + 
+  geom_point(size = 2) + 
+  scale_color_manual(labels=c('+/+','R684C/+'), values=group.colors) + 
+  xlab('PC1: 75% variance') +
+  ylab('PC2: 14% variance') +
+  theme_bw(base_size=8) +
+  theme(axis.text=element_text(size=8, color='black'),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color='black',
+                                    fill=NA,
+                                    size=1),
+        legend.position = 'none')
+# dev.off()
+```
+
+It would be interesting to know what PC1 represents, e.g. osteoblast differentiation. Unfortunately, there are no Alizarin quants available for these samples, so instead, extract the PC1 coordinates and run the correlation coefficient with raw counts for each gene.
+```{r class.source='fold-show', results='hide', message=FALSE, warning=FALSE}
+pca <- plotPCA(vst(dds.coll.filtered), returnData=TRUE)
+pc.cor <- function(x){
+  cor(x, pca$PC1)
+}
+pc.cor.res <- apply(counts(dds),1,pc.cor)
+pc.cor.df <- data.frame(ensembl_gene_id=names(pc.cor.res),
+                        coeff=unname(pc.cor.res))
+```
+
+Following the hypothesis that PC1 might represent osteoblast differentiation, load in the MGI osteogenesis list and get the correlation coefficients specifically for osteogenesis genes.
+```{r class.source='fold-show'}
+mgi_ost <- read.csv(file='GO_term_summary_20230325_181053.csv')
+mgi_ost <- mgi_ost[which(!(mgi_ost$Qualifier=='NOT')),]
+# table(mgi_ost$Annotated.Term)
+mgi_ost.condense <- data.frame(Symbol=mgi_ost$Symbol, Name=mgi_ost$Name) %>% distinct()
+mgi_ost.condense.ensembl <- get.ensembl(mgi_ost.condense$Symbol)
+
+pc.cor.df.ost <- pc.cor.df[which(pc.cor.df$ensembl_gene_id %in% mgi_ost.condense.ensembl$gene_id),]
+ost.annotate <- ensembl.annotate(pc.cor.df.ost$ensembl_gene_id)
+pc.cor.df.ost <- merge(pc.cor.df.ost, ost.annotate, by='ensembl_gene_id')
+```
+
+The histogram of correl coeff for osteogenesis genes is bimodal, which suggests that PC1 may very well represent osteogenesis (among other processes).
+```{r}
+# setEPS()
+# postscript(file='plots_final/density_PC1_ost.eps', width=2.35, height=1.77)
+par(mar=c(1.35,1.1,0,0), mgp=c(0.5,0.075,0))
+
+init.df <- data.frame(matrix(ncol=0, nrow=512))
+for (i in seq(1:100)) {
+  pc.cor.df.rand <- pc.cor.df[sample(1:nrow(pc.cor.df), 179, replace = FALSE),]
+  iter.density <- density(pc.cor.df.rand$coeff, from=-1, to=1, bw=0.05, cut=0)
+  init.df <- cbind(init.df, iter.density$y)
+}
+
+init.df.y <- rowMeans(init.df)
+iter.density$y <- init.df.y
+
+plot.new()
+plot.window(xlim=c(-1,1), ylim=c(0,1.5))
+
+init.df.sd <- apply(init.df,1,sd)
+
+iter.density.upper <- iter.density
+iter.density.upper$y <- init.df.y + init.df.sd
+lines(iter.density.upper, col='gray80', lwd=2)
+
+iter.density.lower <- iter.density
+iter.density.lower$y <- init.df.y - init.df.sd
+lines(iter.density.lower, col='gray80', lwd=2)
+
+polygon(c(iter.density$x, rev(iter.density$x)), c(iter.density.upper$y, rev(iter.density.lower$y)), col='gray80', lty=0)
+  
+lines(iter.density, col='gray50', lwd=2)
+lines(density(pc.cor.df.ost$coeff, from=-1, to=1, bw=0.05, cut=0), col='deepskyblue', lwd=2)
+
+axis(1, at=c(-1,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(0,1.4), tck=-0.02, cex.axis=0.7, pos=-1)
+mtext('Correlation coefficient', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+
+legend('top', legend=c('Random subset, avg', 'MGI ost genes'),
+       col=c("gray50", "deepskyblue"), lty=c(1,1), lwd=2, cex=0.7,
+       box.lty=0)
+# dev.off()
+
+# setEPS()
+# postscript(file='plots_final/density_PC1_all.eps', width=2.35, height=1.77)
+par(mar=c(1.35,1.1,0,0), mgp=c(0.5,0.075,0))
+plot.new()
+plot.window(xlim=c(-1,1), ylim=c(0,1.5))
+lines(density(pc.cor.df$coeff, from=-1, to=1, bw=0.05, cut=0),
+      col='black', lwd=2)
+axis(1, at=c(-1,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(0,1.4), tck=-0.02, cex.axis=0.7, pos=-1)
+mtext('Correlation coefficient', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+legend('top', legend=c('All genes'),
+       col=c("black"), lty=1, lwd=2, cex=0.7,
+       box.lty=0)
+# dev.off()
+```
+<br>
+<i><b>See </b></i>`Bmp_analysis.Rmd` <i><b>for analysis and figures relating to the Bmp pathway and osteogenesis genes.</b></i>

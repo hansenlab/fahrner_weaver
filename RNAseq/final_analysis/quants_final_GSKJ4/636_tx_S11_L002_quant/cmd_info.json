@@ -1,0 +1,12 @@
+{
+    "salmon_version": "1.9.0",
+    "index": "/users/cgao/fahrner_weaver/extdata/RNAseq/GRCm38_cdna_index_decoy-aware",
+    "libType": "A",
+    "mates1": "636_tx_S11_L002_R1_001.fastq.gz",
+    "mates2": "636_tx_S11_L002_R2_001.fastq.gz",
+    "threads": "8",
+    "validateMappings": [],
+    "gcBias": [],
+    "output": "quants_final_GSKJ4/636_tx_S11_L002_quant",
+    "auxDir": "aux_info"
+}

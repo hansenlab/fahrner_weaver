@@ -1,0 +1,22 @@
+{
+    "read_files": "[ 614_tx_S5_L002_R1_001.fastq.gz, 614_tx_S5_L002_R2_001.fastq.gz]",
+    "expected_format": "IU",
+    "compatible_fragment_ratio": 1.0,
+    "num_compatible_fragments": 19986605,
+    "num_assigned_fragments": 19986605,
+    "num_frags_with_concordant_consistent_mappings": 19473975,
+    "num_frags_with_inconsistent_or_orphan_mappings": 646959,
+    "strand_mapping_bias": 0.5030401343331292,
+    "MSF": 0,
+    "OSF": 0,
+    "ISF": 9796191,
+    "MSR": 0,
+    "OSR": 0,
+    "ISR": 9677784,
+    "SF": 312571,
+    "SR": 334388,
+    "MU": 0,
+    "OU": 0,
+    "IU": 0,
+    "U": 0
+}

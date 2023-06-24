@@ -110,7 +110,7 @@ hist(res$pvalue, freq=FALSE, breaks=50,
 setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
 load(file='dds_final.rda')
 dds_final <- dds
-setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/GSE138980")
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/GSE138980/BigStuff")
 load(file='dds_GSE138980.rda')
 dds_GSE138980 <- dds
 rm(dds)
@@ -118,13 +118,41 @@ res_final <- results(dds_final)
 res_GSE138980 <- results(dds_GSE138980)
 gene_ids_final_less <- rownames(res_final[which(res_final$padj<0.1),])
 gene_ids_final_more <- rownames(res_final[which(res_final$padj>0.1),])
-hist(res_GSE138980[which(rownames(res_GSE138980) %in% gene_ids_final_less),]$pvalue,
-     freq=FALSE, breaks=50,
-     xlab='p-values (GSK126 vs Ctrl)',
-     main='FDR < 0.1, R684C/+ vs WT',
-     ylim=c(0,12))
-hist(res_GSE138980[which(rownames(res_GSE138980) %in% gene_ids_final_more),]$pvalue,
-     freq=FALSE, breaks=50,
-     xlab='p-values (GSK126 vs Ctrl)',
-     main='FDR > 0.1, R684C/+ vs WT',
-     ylim=c(0,12))
+gene_ids_GSE138980_less <- rownames(res_GSE138980[which(res_GSE138980$padj<0.1),])
+gene_ids_GSE138980_more <- rownames(res_GSE138980[which(res_GSE138980$padj>0.1),])
+
+setEPS()
+postscript(file='../density_cond-D14.eps', width=2.36, height=1.77)
+par(mar=c(1.35,1.1,0,0), mgp=c(0.5,0.075,0))
+plot(density(res_final[which(rownames(res_final) %in% gene_ids_GSE138980_less),]$pvalue, 
+             from=0.01,to=0.97, bw=0.025), 
+     asp=NA, lwd=2, col='orange', main='', bty='n', yaxt='n', xaxt='n', ylab='', xlab='')
+lines(density(res_final[which(rownames(res_final) %in% gene_ids_GSE138980_more),]$pvalue, 
+             from=0.01,to=0.97, bw=0.025),
+     lwd=2, col='black')
+axis(1, at=c(0,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(.6,2.1), tck=-0.02, cex.axis=0.7, pos=-0.02)
+mtext('p-values, D14', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+legend('topright', legend=c('p-adj > 0.1, GSK-126', 'p-adj < 0.1, GSK-126'),
+       col=c("black", "orange"), lty=c(1,1), lwd=2, cex=0.7,
+       box.lty=0)
+dev.off()
+
+setEPS()
+postscript(file='../density_cond-GSE138980.eps', width=2.36, height=1.77)
+par(mar=c(1.35,1.1,0,0), mgp=c(0.5,0.075,0))
+plot(density(res_GSE138980[which(rownames(res_GSE138980) %in% gene_ids_final_less),]$pvalue, 
+             from=0.01,to=0.98, bw=0.025), 
+     asp=NA, lwd=2, col='orange', main='', bty='n', yaxt='n', xaxt='n', ylab='', xlab='')
+lines(density(res_GSE138980[which(rownames(res_GSE138980) %in% gene_ids_final_more),]$pvalue, 
+              from=0.01,to=0.98, bw=0.025),
+      lwd=2, col='black')
+axis(1, at=c(0,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(.5,4.2), tck=-0.02, cex.axis=0.7, pos=-0.02)
+mtext('p-values, GSK-126', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+legend('topright', legend=c('p-adj > 0.1, D14', 'p-adj < 0.1, D14'),
+       col=c("black", "orange"), lty=c(1,1), lwd=2, cex=0.7,
+       box.lty=0)
+dev.off()

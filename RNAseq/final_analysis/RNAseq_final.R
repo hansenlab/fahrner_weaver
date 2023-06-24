@@ -105,15 +105,17 @@ dev.off()
 
 # p-value density histogram
 setEPS()
-postscript('221016_p-val-hist.eps')
+postscript('fig4b.eps', width = 7, height = 5)
 hist(res$pvalue, 
      freq=FALSE,
      breaks = 40, 
      ylim = c(0, 3), 
-     col = 'cornflowerblue', 
+     col = 'gray60', 
      xlab = "p-values", 
      main = "R684C/+ vs. +/+", 
-     font.main = 1)
+     font.main = 1,
+     cex.axis=1.5,
+     cex.lab=1.5)
 dev.off()
 
 # Wilcoxon rank-sum, osteogenesis genes
@@ -164,6 +166,7 @@ genes_bmp2 <- genes_bmp2$X1
 genes_bmp2 <- toupper(genes_bmp2)
 genes_bmp2 <- genes_bmp2[-which(duplicated(genes_bmp2))]
 gene_ids <- unique(proms_mouse$gene_id[which(proms_mouse$gene_name %in% genes_bmp2)])
+save(gene_ids, file='gene_ids_bmp.rda')
 
 rank_WS <- wilcox.test(res$pvalue[which(rownames(res) %in% gene_ids)], 
                        res$pvalue[-which(rownames(res) %in% gene_ids)])$statistic
@@ -179,35 +182,37 @@ save(permutation_rank_Bmp2, file='permutation_rank_Bmp2.rda')
 prop.table(table(permutation_rank_Bmp2<rank_WS))
 
 setEPS()
-postscript('221016_Bmp2.eps')
-hist(permutation_rank_Bmp2, col = "cornflowerblue", lty = 0, 
+postscript('fig4d.eps', width=7, height=6)
+hist(permutation_rank_Bmp2, col = "gray60", lty = 0, 
      breaks = 50, freq = FALSE, xlab = "Wilcoxon rank-sum test stat", cex.lab = 1.2, yaxt = 'n',
      main = "BMP pathway genes", cex.main = 1.2, font.main = 1, xlim = c(rank_WS-50000, max(permutation_rank_Bmp2)+0.05), xaxt = 'n')
 axis(1, at = c(round(quantile(permutation_rank_Bmp2, c(0.01, 0.99))),rank_WS), cex.axis = 1.1)
 axis(2, at = c(0, 0.000008), cex.axis = 1.1)
-abline(v = rank_WS, col = "red", lwd = 2.5)
+abline(v = rank_WS, col = "magenta", lwd = 3)
+text(rank_WS+10000, 0.000007,"p < 9.9e-06", adj=0, col = "magenta")
 legend <- legend("topright", legend = c("random", "observed"), 
-                 col = c("cornflowerblue", "red"), bty = 'n', 
-                 cex = 1, lty = "solid", lwd = 2.5)
+                 col = c("gray60", "magenta"), bty = 'n', 
+                 cex = 1, lty = "solid", lwd = 3)
 dev.off()
 
-gene_ids <- rownames(res[which(res$padj<0.1),])
-makeVolcanoPlot <- function(DEgenes_df, lfc_cutoff, gene_ids, color){
+makeVolcanoPlot <- function(DEgenes_df, lfc_cutoff, gene_ids, circ_ids, circ_names, color){
   tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
   rownames(tab) <- rownames(DEgenes_df)
   par(mar=c(5,5,5,5))
-  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 16, cex = 0.75, 
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.75, 
        xlab = expression(log[2]~fold~change),
        ylab = expression(-log[10]~pvalue), 
        cex.axis=1.5,
        cex.lab=1.5,
        col = "gray60", bty = 'l', 
        xlim = c(min(tab$logFC), max(tab$logFC)), 
-       ylim = c(0, max(-log10(res$pvalue)[which(is.na(-log10(res$pvalue))==FALSE)])))
+       ylim = c(0, 10))#max(-log10(res$pvalue)[which(is.na(-log10(res$pvalue))==FALSE)])))
   points(tab[gene_ids, ], pch = 19, cex = 0.75, col = color)
-  # abline(h = -log10(0.00139149), col= "cornflowerblue", lty=2, lwd=2)
-  legend <- legend('topleft', legend=c('FDR < 0.1','other'),
-                   col=c('red','gray60'), lty=c(NA, NA), pch=c(19,19), lwd=c(NA,NA), cex=1.25, bty='n')
+  circles(tab[circ_ids, ]$logFC, tab[circ_ids, ]$negLogPval, r = rep(0.12, length(circ_ids)), col='black')
+  text(tab[circ_ids, ]$logFC+0.15, tab[circ_ids, ]$negLogPval+0.25, labels=circ_names, adj=0, col='black')
+  abline(h = -log10(0.00139149), col= "red", lty=2, lwd=2)
+  legend <- legend('topleft', legend=c('BMP pathway','other'),
+                   col=c(color,'gray60'), lty=c(NA, NA), pch=c(19,19), lwd=c(NA,NA), cex=1, bty='n')
   # legend <- legend('topright', legend=c('FDR = 0.1'),
   #                  col=c('cornflowerblue'), lty=c(2), pch=c(NA), lwd=c(2), cex=1.25, bty='n')
   if (lfc_cutoff != "none"){
@@ -216,9 +221,41 @@ makeVolcanoPlot <- function(DEgenes_df, lfc_cutoff, gene_ids, color){
 }
 
 setEPS()
-postscript('221019_WS_volcano.eps', width=7, height=6)
-makeVolcanoPlot(res, "none", gene_ids, "red") #gene_ids have been set to the chondrogenesis gene ids
+postscript('fig4c.eps', width=7, height=7)
+gene_ids <- rownames(res[which(res$padj<0.1),])
+makeVolcanoPlot(res, "none", gene_ids, circ_ids='', circ_names='', "orange") 
+dev.off()
+
+setEPS()
+postscript('fig4e.eps', width=7, height=7) #set gene_ids to bmp pathway, code above
+circ_ids <- c('ENSMUSG00000051279', 
+              'ENSMUSG00000020427',
+              'ENSMUSG00000021540',
+              'ENSMUSG00000039153',
+              'ENSMUSG00000060284')
+circ_names <- c('Gdf6',
+                'Igfbp3',
+                'Smad5',
+                'Runx2',
+                'Sp7')
+makeVolcanoPlot(res, "none", gene_ids, circ_ids, circ_names, "magenta")
+text(-6,-log10(0.00139149)+0.5, "FDR = 0.1", col="red")
 dev.off()
 
 fdr <- res[which(res$padj>0.1 & is.na(res$padj)==FALSE),]
 fdr[which(fdr$padj==min(fdr$padj)),]
+
+plot <- plotPCA(vst(dds.coll.filtered), returnData=TRUE)
+plot$group <- relevel(plot$group, ref='WT')
+group.colors <- c('#0F80FF','#FB0207')
+setEPS()
+postscript('Fig4a.eps', width=9, height=5)
+ggplot(data = plot, aes(x = PC1, y = PC2, color=group)) + 
+  geom_point(size = 4) + 
+  scale_color_manual(labels=c('+/+','R684C/+'), values=group.colors) + 
+  xlab('PC1: 75% variance') +
+  ylab('PC2: 14% variance') +
+  theme_bw(base_size=18) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+dev.off()

@@ -1,0 +1,22 @@
+{
+    "read_files": "[ 626_tx_S12_L002_R1_001.fastq.gz, 626_tx_S12_L002_R2_001.fastq.gz]",
+    "expected_format": "IU",
+    "compatible_fragment_ratio": 1.0,
+    "num_compatible_fragments": 18775034,
+    "num_assigned_fragments": 18775034,
+    "num_frags_with_concordant_consistent_mappings": 18285970,
+    "num_frags_with_inconsistent_or_orphan_mappings": 606984,
+    "strand_mapping_bias": 0.5023536623980024,
+    "MSF": 0,
+    "OSF": 0,
+    "ISF": 9186024,
+    "MSR": 0,
+    "OSR": 0,
+    "ISR": 9099946,
+    "SF": 282613,
+    "SR": 324371,
+    "MU": 0,
+    "OU": 0,
+    "IU": 0,
+    "U": 0
+}

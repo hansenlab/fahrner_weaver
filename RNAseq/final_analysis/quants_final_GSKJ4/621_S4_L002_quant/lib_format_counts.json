@@ -1,0 +1,22 @@
+{
+    "read_files": "[ 621_S4_L002_R1_001.fastq.gz, 621_S4_L002_R2_001.fastq.gz]",
+    "expected_format": "IU",
+    "compatible_fragment_ratio": 1.0,
+    "num_compatible_fragments": 22331993,
+    "num_assigned_fragments": 22331993,
+    "num_frags_with_concordant_consistent_mappings": 21732552,
+    "num_frags_with_inconsistent_or_orphan_mappings": 756283,
+    "strand_mapping_bias": 0.5022515073241284,
+    "MSF": 0,
+    "OSF": 0,
+    "ISF": 10915207,
+    "MSR": 0,
+    "OSR": 0,
+    "ISR": 10817345,
+    "SF": 356384,
+    "SR": 399899,
+    "MU": 0,
+    "OU": 0,
+    "IU": 0,
+    "U": 0
+}

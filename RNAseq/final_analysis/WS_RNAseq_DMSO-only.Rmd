@@ -1,0 +1,205 @@
+---
+title: "WS RNAseq DMSO only"
+author: "Christine Gao"
+date: "3/7/2023"
+output: html_document
+---
+
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+```
+
+Import counts for DMSO samples only
+```{r, results=FALSE, message=FALSE, warning=FALSE}
+### BEGIN IMPORT
+samples <- read.csv('RNAseq-samples_DMSO-only.csv')
+
+dir <- '~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/quants_final_GSKJ4'
+files <- file.path(dir, paste(samples$Sample.ID, '_quant', sep=''), 'quant.sf')
+
+file.exists(files)
+coldata <- data.frame(files, 
+                      names=samples$Sample.ID, 
+                      genotype=as.factor(samples$Genotype), 
+                      mouse=as.factor(samples$Mouse),
+                      tx=as.factor(samples$Tx),
+                      stringsAsFactors = FALSE)
+
+# import transcript abundances
+se <- tximeta(coldata)
+
+# summarize abundances to gene level
+gse <- summarizeToGene(se)
+
+# load SummarizedExperiment into DESeqDataSet
+dds <- DESeqDataSet(gse, design = ~genotype)
+### END IMPORT
+```
+
+Collapse technical replicates and filter out non/low-expressed genes
+```{r, results=FALSE, message=FALSE, warning=FALSE}
+# collapse technical replicates
+dds$sample <- factor(gsub("_S.*", "", colnames(dds)))
+dds.coll <- collapseReplicates(dds, dds$sample)
+stopifnot(all(rowSums(counts(dds[,which(dds$sample=="614")])) == counts(dds.coll[,1])))
+dds.coll.counts <- counts(dds.coll)
+
+# filter genes with low median counts
+keep <- rowMedians(counts(dds.coll)) > 10
+dds.coll.filtered <- dds.coll[keep,]
+
+# relevel so that reference is WT
+dds.coll.filtered$genotype <- relevel(dds.coll.filtered$genotype, ref="WT")
+```
+
+Plot PCA
+```{r, results=FALSE, message=FALSE, warning=FALSE}
+plot <- plotPCA(vst(dds.coll.filtered), intgroup='genotype')
+plot + geom_label_repel(aes(label=gsub("_S.*", "", colnames(dds.coll.filtered))), show.legend = FALSE)
+```
+
+Unconstrained svaseq identifies 3 surrogate variables, which is one more than in the first RNAseq of untreated Mut vs WT
+```{r}
+dds.coll.filtered.counts <- counts(dds.coll.filtered)
+mod <- model.matrix(~genotype, colData(dds.coll.filtered))
+mod0 <- model.matrix(~1, colData(dds.coll.filtered))
+svseq <- svaseq(dds.coll.filtered.counts, mod, mod0)
+```
+
+Applying the 3 SVs and running the differential analysis results in 3545 differentially expressed genes
+```{r}
+# append surrogate variables
+ddssva <- dds.coll.filtered
+ddssva$SV1 <- svseq$sv[,1]
+ddssva$SV2 <- svseq$sv[,2]
+ddssva$SV3 <- svseq$sv[,3]
+design(ddssva) <- formula(~SV1 + SV2 + SV3 + genotype)
+
+# DESeq2 call
+ddssva <- DESeq(ddssva, quiet=TRUE)
+dds <- ddssva
+save(dds, file='dds_DMSO-only_3-SVA.rda')
+
+res <- results(dds)
+
+diffexp.subset.3 <- as.data.frame(res[which(res$padj <0.1),])
+
+diffexp.sva <- data.frame(sva=numeric(), diffexp=numeric())
+diffexp.sva <- rbind(diffexp.sva, data.frame(sva=3, diffexp=nrow(diffexp.subset.3)))
+```
+
+p-value histogram for 3 surrogate variables
+```{r}
+sva3_hist <- hist(res$pvalue, breaks=40, freq=FALSE, main='3 surrogate variables',
+                  ylim=c(0,14))
+```
+
+Repeat for 1-5 surrogate variables
+```{r, include=FALSE}
+svseq <- svaseq(dds.coll.filtered.counts, mod, mod0, n.sv=1)
+ddssva <- dds.coll.filtered
+ddssva$SV1 <- svseq$sv[,1]
+design(ddssva) <- formula(~SV1 + genotype)
+ddssva <- DESeq(ddssva, quiet=TRUE)
+dds <- ddssva
+save(dds, file='dds_DMSO-only_1-SVA.rda')
+res <- results(dds)
+diffexp.subset.1 <- as.data.frame(res[which(res$padj <0.1),])
+diffexp.sva <- rbind(diffexp.sva, data.frame(sva=1, diffexp=nrow(diffexp.subset.1)))
+sva1_hist <- hist(res$pvalue, breaks=40, freq=FALSE)
+
+svseq <- svaseq(dds.coll.filtered.counts, mod, mod0, n.sv=2)
+ddssva <- dds.coll.filtered
+ddssva$SV1 <- svseq$sv[,1]
+ddssva$SV2 <- svseq$sv[,2]
+design(ddssva) <- formula(~SV1 + SV2 + genotype)
+ddssva <- DESeq(ddssva, quiet=TRUE)
+dds <- ddssva
+save(dds, file='dds_DMSO-only_2-SVA.rda')
+res <- results(dds)
+diffexp.subset.2 <- as.data.frame(res[which(res$padj <0.1),])
+diffexp.sva <- rbind(diffexp.sva, data.frame(sva=2, diffexp=nrow(diffexp.subset.2)))
+sva2_hist <- hist(res$pvalue, breaks=40, freq=FALSE)
+
+svseq <- svaseq(dds.coll.filtered.counts, mod, mod0, n.sv=4)
+ddssva <- dds.coll.filtered
+ddssva$SV1 <- svseq$sv[,1]
+ddssva$SV2 <- svseq$sv[,2]
+ddssva$SV3 <- svseq$sv[,3]
+ddssva$SV4 <- svseq$sv[,4]
+design(ddssva) <- formula(~SV1 + SV2 + SV3 + SV4 + genotype)
+ddssva <- DESeq(ddssva, quiet=TRUE)
+dds <- ddssva
+save(dds, file='dds_DMSO-only_4-SVA.rda')
+res <- results(dds)
+diffexp.subset.4 <- as.data.frame(res[which(res$padj <0.1),])
+diffexp.sva <- rbind(diffexp.sva, data.frame(sva=4, diffexp=nrow(diffexp.subset.4)))
+sva4_hist <- hist(res$pvalue, breaks=40, freq=FALSE)
+
+svseq <- svaseq(dds.coll.filtered.counts, mod, mod0, n.sv=5)
+ddssva <- dds.coll.filtered
+ddssva$SV1 <- svseq$sv[,1]
+ddssva$SV2 <- svseq$sv[,2]
+ddssva$SV3 <- svseq$sv[,3]
+ddssva$SV4 <- svseq$sv[,4]
+ddssva$SV5 <- svseq$sv[,5]
+design(ddssva) <- formula(~SV1 + SV2 + SV3 + SV4 + SV5 + genotype)
+ddssva <- DESeq(ddssva, quiet=TRUE)
+dds <- ddssva
+save(dds, file='dds_DMSO-only_5-SVA.rda')
+res <- results(dds)
+diffexp.subset.5 <- as.data.frame(res[which(res$padj <0.1),])
+diffexp.sva <- rbind(diffexp.sva, data.frame(sva=5, diffexp=nrow(diffexp.subset.5)))
+sva5_hist <- hist(res$pvalue, breaks=40, freq=FALSE)
+```
+
+
+```{r}
+par(mfrow = c(2,3))
+plot(sva1_hist, freq=FALSE, main='1 surrogate variable', ylim=c(0,14))
+plot(sva2_hist, freq=FALSE, main='2 surrogate variables', ylim=c(0,14))
+plot(sva3_hist, freq=FALSE, main='3 surrogate variables', ylim=c(0,14))
+plot(sva4_hist, freq=FALSE, main='4 surrogate variables', ylim=c(0,14))
+plot(sva5_hist, freq=FALSE, main='5 surrogate variables', ylim=c(0,14))
+```
+
+How many differentially expressed genes are there for each analysis?
+```{r}
+diffexp.sva[order(diffexp.sva$sva),]
+```
+
+Many differentially expressed genes are shared across all 5 analyses
+```{r}
+merge.1 <- data.frame(ens = rownames(diffexp.subset.1),
+                      sva1=rep(1,nrow(diffexp.subset.1)))
+merge.2 <- data.frame(ens = rownames(diffexp.subset.2),
+                      sva2=rep(1,nrow(diffexp.subset.2)))
+merge.3 <- data.frame(ens = rownames(diffexp.subset.3),
+                      sva3=rep(1,nrow(diffexp.subset.3)))
+merge.4 <- data.frame(ens = rownames(diffexp.subset.4),
+                      sva4=rep(1,nrow(diffexp.subset.4)))
+merge.5 <- data.frame(ens = rownames(diffexp.subset.5),
+                      sva5=rep(1,nrow(diffexp.subset.5)))
+
+diffexp.merge <- merge(merge.1, merge.2, by='ens', all=TRUE)
+diffexp.merge <- merge(diffexp.merge, merge.3, by='ens', all=TRUE)
+diffexp.merge <- merge(diffexp.merge, merge.4, by='ens', all=TRUE)
+diffexp.merge <- merge(diffexp.merge, merge.5, by='ens', all=TRUE)
+rownames(diffexp.merge) <- diffexp.merge$ens
+diffexp.merge <- diffexp.merge[,2:6]
+diffexp.merge$sum <- rowSums(diffexp.merge, na.rm=TRUE)
+head(diffexp.merge, n=10)
+table(diffexp.merge$sum)
+```

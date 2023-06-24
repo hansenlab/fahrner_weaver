@@ -1,0 +1,145 @@
+---
+title: "Supplement"
+author: "Christine Gao"
+date: "5/19/2023"
+output: 
+  html_document:
+    code_folding: hide
+---
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+library(tripack)
+library(EnsDb.Mmusculus.v79)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(dplyr)
+library(scales)
+```
+
+```{r}
+get.ensembl <- function(x) {
+  edb_mouse <- EnsDb.Mmusculus.v79
+  proms_mouse <- promoters(edb_mouse, 
+                           filter = TxBiotypeFilter("protein_coding"), 
+                           upstream = 2000, 
+                           downstream = 2000, 
+                           columns = c("gene_name", "tx_id", "gene_id"))
+  genome(seqinfo(proms_mouse)) <- "mm10"
+  seqlevelsStyle(proms_mouse) <- "ucsc"
+  proms_mouse <- proms_mouse[which(seqnames(proms_mouse) %in% seqnames(Mmusculus)[1:21])]
+  proms_mouse$gene_name <- toupper(proms_mouse$gene_name)
+
+  x <- toupper(x)
+  x <- unique(x)
+  ensembl.ids <- as.data.frame(
+    unique(proms_mouse[which(proms_mouse$gene_name %in% x), c('gene_name','gene_id')]),
+    row.names=NULL)
+  ensembl.ids <- ensembl.ids[, c('gene_name','gene_id')] %>% distinct()
+  return(ensembl.ids)
+}
+```
+
+```{r}
+ensembl.annotate <- function(ensembl.id){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol','mgi_description'),
+               filters='ensembl_gene_id',
+               values=ensembl.id,
+               mart=ensembl102.mmusculus)
+  return(mgi)
+}
+```
+
+<b>Supp Fig 5A</b>
+```{r}
+load(file='BigStuff/dds_final.rda')
+load(file='BigStuff/dds.coll.filtered_untreated.rda')
+load(file='mgi_ost.condense.ensembl.rda')
+
+library(DGEobj.utils)
+
+pca <- plotPCA(vst(dds.coll.filtered), returnData=TRUE)
+pc.cor <- function(x){
+  cor(x, pca$PC1)
+}
+pc.cor.res <- apply(convertCounts(counts(dds), unit='CPM', log=FALSE),1,pc.cor)
+pc.cor.df <- data.frame(ensembl_gene_id=names(pc.cor.res),
+                        coeff=unname(pc.cor.res))
+
+pc.cor.df.ost <- pc.cor.df[which(pc.cor.df$ensembl_gene_id %in% mgi_ost.condense.ensembl$gene_id),]
+ost.annotate <- ensembl.annotate(pc.cor.df.ost$ensembl_gene_id)
+pc.cor.df.ost <- merge(pc.cor.df.ost, ost.annotate, by='ensembl_gene_id')
+
+setEPS()
+postscript(file='plots_final/density_PC1_all.eps', width=2.35, height=1.77)
+par(mar=c(1.35,1.1,0.2,0), mgp=c(0.5,0.075,0))
+plot.new()
+plot.window(xlim=c(-1,1), ylim=c(0,1.5))
+lines(density(pc.cor.df$coeff, from=-1, to=1, bw=0.05, cut=0),
+      col='black', lwd=2)
+axis(1, at=c(-1,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(0,1.5), tck=-0.02, cex.axis=0.7, pos=-1)
+mtext('Correlation coefficient', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+legend('top', legend=c('All genes'),
+       col=c("black"), lty=1, lwd=2, cex=0.7,
+       box.lty=0)
+dev.off()
+```
+
+<b>Supp Fig 5B</b>
+```{r}
+setEPS()
+postscript(file='plots_final/density_PC1_ost.eps', width=2.35, height=1.77)
+par(mar=c(1.35,1.1,0.2,0), mgp=c(0.5,0.075,0))
+
+init.df <- data.frame(matrix(ncol=0, nrow=512))
+for (i in seq(1:100)) {
+  pc.cor.df.rand <- pc.cor.df[sample(1:nrow(pc.cor.df), 179, replace = FALSE),]
+  iter.density <- density(pc.cor.df.rand$coeff, from=-1, to=1, bw=0.05, cut=0)
+  init.df <- cbind(init.df, iter.density$y)
+}
+
+init.df.y <- rowMeans(init.df)
+iter.density$y <- init.df.y
+
+plot.new()
+plot.window(xlim=c(-1,1), ylim=c(0,1.5))
+
+init.df.sd <- apply(init.df,1,sd)
+
+iter.density.upper <- iter.density
+iter.density.upper$y <- init.df.y + init.df.sd
+lines(iter.density.upper, col='gray80', lwd=2)
+
+iter.density.lower <- iter.density
+iter.density.lower$y <- init.df.y - init.df.sd
+lines(iter.density.lower, col='gray80', lwd=2)
+
+polygon(c(iter.density$x, rev(iter.density$x)), c(iter.density.upper$y, rev(iter.density.lower$y)), col='gray80', lty=0)
+  
+lines(iter.density, col='gray50', lwd=2)
+lines(density(pc.cor.df.ost$coeff, from=-1, to=1, bw=0.05, cut=0), col='deepskyblue', lwd=2)
+
+axis(1, at=c(-1,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(0,1.5), tck=-0.02, cex.axis=0.7, pos=-1)
+mtext('Correlation coefficient', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+
+legend('top', legend=c('Random subset, avg', 'MGI ost genes'),
+       col=c("gray50", "deepskyblue"), lty=c(1,1), lwd=2, cex=0.7,
+       box.lty=0)
+dev.off()
+```
+

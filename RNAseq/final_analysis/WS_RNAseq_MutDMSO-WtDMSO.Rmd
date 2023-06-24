@@ -1,0 +1,231 @@
+---
+title: "RNAseq +/- GSKJ4, MutDMSO vs WtDMSO"
+author: "Christine Gao"
+date: "3/11/2023"
+output: html_document
+---
+
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+library(tripack)
+```
+
+Load dds object.
+```{r}
+load(file='dds_collapsed_GSKJ4.rda')
+```
+
+Set contrast for comparing MutDMSO vs WtDMSO.
+```{r}
+mod_mat <- model.matrix(design(dds), colData(dds))
+res.MutDMSO.WtDMSO <- results(dds, contrast = list(c('genotype_Mut_vs_WT')))
+```
+
+Plot p-value histogram.
+```{r}
+hist(res.MutDMSO.WtDMSO$pvalue, 
+     freq=FALSE,
+     breaks = 40, 
+     #ylim = c(0, 3), 
+     col = 'gray60', 
+     xlab = "p-values", 
+     main = "MutDMSO vs WtDMSO", 
+     font.main = 1,
+     cex.axis=1.5,
+     cex.lab=1.5)
+```
+
+Get list of all differentially expressed genes.
+```{r}
+diffexp.all <- as.data.frame(res.MutDMSO.WtDMSO[which(res.MutDMSO.WtDMSO$padj<0.1),])
+
+ensembl.id <- rownames(diffexp.all)
+
+ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol','mgi_description'),
+             filters='ensembl_gene_id',
+             values=ensembl.id,
+             mart=ensembl102.mmusculus)
+diffexp.all$ensembl_gene_id <- ensembl.id
+diffexp.all <- merge(diffexp.all, mgi, by='ensembl_gene_id')
+diffexp.all <- diffexp.all[order(diffexp.all$log2FoldChange, decreasing=TRUE),]
+
+write.csv(diffexp.all, file='diffexp_MutDMSO-WtDMSO.csv')
+```
+
+Find the FDR=0.1 threshold.
+```{r}
+fdr <- res.MutDMSO.WtDMSO[which(res.MutDMSO.WtDMSO$padj>0.1 
+                                  & is.na(res.MutDMSO.WtDMSO$padj)==FALSE),]
+fdr[which(fdr$padj==min(fdr$padj)),]
+```
+
+Find ylim.
+```{r}
+max(-log10(res.MutDMSO.WtDMSO$pvalue[which(is.na(res.MutDMSO.WtDMSO$pvalue) ==FALSE)]))
+```
+
+Volcano plot function.
+```{r}
+makeVolcanoPlot <- function(DEgenes_df, lfc_cutoff, gene_ids, circ_ids, circ_names, ylim, color){
+  tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
+  rownames(tab) <- rownames(DEgenes_df)
+  par(mar=c(5,5,5,5))
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.5, 
+       xlab = expression(log[2]~fold~change),
+       ylab = expression(-log[10]~pvalue), 
+       cex.axis=1.5,
+       cex.lab=1.5,
+       col = "gray60", bty = 'l', 
+       xlim = c(min(tab$logFC), max(tab$logFC)), 
+       ylim = c(0, ylim))
+  points(tab[gene_ids, ], pch = 19, cex = 0.5, col = color)
+  points(tab[circ_ids, ], pch = 1, cex = 1.5, col= 'black')
+  # circles(tab[circ_ids, ]$logFC, tab[circ_ids, ]$negLogPval, 
+  #         r = rep(0.12, length(circ_ids)), col='black')
+  text(tab[circ_ids, ]$logFC-0.15, tab[circ_ids, ]$negLogPval, 
+       labels=circ_names, adj=1, cex = 0.75, col='black')
+  abline(h = -log10(0.0190899), col= "red", lty=2, lwd=2)
+  # legend <- legend('topleft', legend=c('FDR < 0.1','other'),
+  #                  col=c(color,'gray60'), lty=c(NA, NA), pch=c(19,19), lwd=c(NA,NA), cex=1, bty='n')
+  # legend <- legend('topright', legend=c('FDR = 0.1'),
+  #                  col=c('cornflowerblue'), lty=c(2), pch=c(NA), lwd=c(2), cex=1.25, bty='n')
+  if (lfc_cutoff != "none"){
+    abline(v = c(-lfc_cutoff, lfc_cutoff), col = rgb(0,0,0,0.75), lty = "longdash", lwd = 1) 
+  }
+}
+```
+
+Make volcano plot, highlighting genes with FDR < 0.1.
+```{r}
+# setEPS()
+# postscript('plots_final/volcano_MutDMSO.WtDMSO.eps')
+gene_ids <- rownames(res.MutDMSO.WtDMSO[which(res.MutDMSO.WtDMSO$padj<0.1),])
+makeVolcanoPlot(res.MutDMSO.WtDMSO, "none", gene_ids, circ_ids='', circ_names='', ylim=15, "orange")
+# dev.off()
+```
+
+Load Bmp pathway genes and mark volcano plot
+```{r}
+load(file='gene_ids_bmp.rda')
+gene_ids.bmp <- gene_ids
+circ_ids <- c('ENSMUSG00000051279', 
+              'ENSMUSG00000020427',
+              'ENSMUSG00000021540',
+              'ENSMUSG00000039153',
+              'ENSMUSG00000060284')
+circ_names <- c('Gdf6',
+                'Igfbp3',
+                'Smad5',
+                'Runx2',
+                'Sp7')
+makeVolcanoPlot(res.MutDMSO.WtDMSO, "none", gene_ids.bmp, circ_ids, circ_names, ylim=20, "magenta")
+```
+
+Which genes are upregulated in MutDMSO compared to WtDMSO, then become downregulated in MutGSKJ4 compared to MutDMSO? <i>\*This setup leads to a winner's curse scenario (?), results may not be valid!\*</i> First create dataframes of log2FCs from both contrasts.
+```{r}
+res.MutGSKJ4.MutDMSO <- results(dds, contrast = list(c('tx_GSKJ4_vs_DMSO',
+                                      'genotypeMut.txGSKJ4')))
+diffexp.all.MutGSKJ4.MutDMSO <- as.data.frame(res.MutGSKJ4.MutDMSO[which(res.MutGSKJ4.MutDMSO$padj<0.1),])
+
+log2FC.MutDMSO.WtDMSO <- data.frame(ensembl=diffexp.all$ensembl_gene_id,
+                                    log2FoldChange=diffexp.all$log2FoldChange)
+log2FC.MutGSKJ4.MutDMSO <- data.frame(ensembl=rownames(diffexp.all.MutGSKJ4.MutDMSO),
+                                      log2FoldChange=diffexp.all.MutGSKJ4.MutDMSO$log2FoldChange)
+```
+
+Merge these log2FC dataframes, keeping only the 1075 genes significant in both.
+```{r}
+table(log2FC.MutDMSO.WtDMSO$ensembl %in% log2FC.MutGSKJ4.MutDMSO$ensembl)
+table(log2FC.MutGSKJ4.MutDMSO$ensembl %in% log2FC.MutDMSO.WtDMSO$ensembl)
+df.compare <- merge(log2FC.MutDMSO.WtDMSO, log2FC.MutGSKJ4.MutDMSO, by='ensembl')
+colnames(df.compare) <- c('ensembl','log2FC.MutDMSO.WtDMSO','log2FC.MutGSKJ4.MutDMSO')
+head(df.compare)
+nrow(df.compare)
+```
+
+Assign directionality to the log2FCs, 1 for upregulated, -1 for downregulated. Genes that flip directionality between the datasets will sum to 0. 
+```{r}
+df.compare$sign.MutDMSO.WtDMSO <- as.numeric(df.compare$log2FC.MutDMSO.WtDMSO /
+  abs(df.compare$log2FC.MutDMSO.WtDMSO))
+df.compare$sign.MutGSKJ4.MutDMSO <- as.numeric(df.compare$log2FC.MutGSKJ4.MutDMSO /
+  abs(df.compare$log2FC.MutGSKJ4.MutDMSO))
+df.compare$sum <- df.compare$sign.MutDMSO.WtDMSO + df.compare$sign.MutGSKJ4.MutDMSO
+head(df.compare)
+table(df.compare$sum)
+```
+
+1045 out of 1075 differentially expressed genes shared between the two contrasts flip signs. <i>I think this is a winner's curse situation, how can this be corrected?</i>
+
+```{r}
+
+plot(df.compare$log2FC.MutDMSO.WtDMSO, df.compare$log2FC.MutGSKJ4.MutDMSO,
+     pch=16, cex=0.75, col=alpha('gray50', 0.5),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs MutDMSO',
+     main='Genes sig in both contrasts')
+load(file='mgi_condense.ensembl.rda')
+points(df.compare$log2FC.MutDMSO.WtDMSO[which(df.compare$ensembl %in% mgi_condense.ensembl)],
+       df.compare$log2FC.MutGSKJ4.MutDMSO[which(df.compare$ensembl %in% mgi_condense.ensembl)],
+       pch=16, cex=0.75, col='red')
+load(file='mgi_ost.condense.ensembl.rda')
+points(df.compare$log2FC.MutDMSO.WtDMSO[which(df.compare$ensembl %in%
+                                                mgi_ost.condense.ensembl$gene_id)],
+       df.compare$log2FC.MutGSKJ4.MutDMSO[which(df.compare$ensembl %in%
+                                                  mgi_ost.condense.ensembl$gene_id)],
+       pch=16, cex=0.75, col='deepskyblue')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+abline(a=0, b=-1, col='blue')
+# dev.copy2pdf(file='plots_final/log2FC_MutDMSO.WtDMSO_MutGSKJ4.MutDMSO_ost.pdf')
+
+```
+
+```{r}
+df.compare.only.MutDMSO.WtDMSO <- log2FC.MutDMSO.WtDMSO[!(log2FC.MutDMSO.WtDMSO$ensembl %in% log2FC.MutGSKJ4.MutDMSO$ensembl),]
+
+df.compare.only.MutDMSO.WtDMSO$log2FC.MutGSKJ4.MutDMSO <-
+  res.MutGSKJ4.MutDMSO[df.compare.only.MutDMSO.WtDMSO$ensembl,]$log2FoldChange
+
+colnames(df.compare.only.MutDMSO.WtDMSO)[2] <- 'log2FC.MutDMSO.WtDMSO'
+
+plot(df.compare.only.MutDMSO.WtDMSO$log2FC.MutDMSO.WtDMSO,
+     df.compare.only.MutDMSO.WtDMSO$log2FC.MutGSKJ4.MutDMSO, 
+     pch=16, cex=0.75, col=alpha('gray50',0.5),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs MutDMSO',
+     main='Genes sig only in MutDMSO vs WtDMSO')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+abline(a=0, b=-1, col='blue')
+```
+
+
+```{r}
+df.compare.only.MutGSKJ4.MutDMSO <- log2FC.MutGSKJ4.MutDMSO[!(log2FC.MutGSKJ4.MutDMSO$ensembl %in% log2FC.MutDMSO.WtDMSO$ensembl),]
+
+df.compare.only.MutGSKJ4.MutDMSO$log2FC.MutDMSO.WtDMSO <-
+  res.MutDMSO.WtDMSO[df.compare.only.MutGSKJ4.MutDMSO$ensembl,]$log2FoldChange
+
+colnames(df.compare.only.MutGSKJ4.MutDMSO)[2] <- 'log2FC.MutGSKJ4.MutDMSO'
+
+plot(df.compare.only.MutGSKJ4.MutDMSO$log2FC.MutDMSO.WtDMSO,
+     df.compare.only.MutGSKJ4.MutDMSO$log2FC.MutGSKJ4.MutDMSO,
+     pch=16, cex=0.75, col=alpha('gray50',0.5),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs MutDMSO',
+     main='Genes sig only in MutGSKJ4 vs MutDMSO')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+abline(a=0, b=-1, col='blue')
+
+```

@@ -1,0 +1,98 @@
+---
+title: "Alizarin correlation"
+author: "Christine Gao"
+date: "3/14/2023"
+output: html_document
+---
+
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+library(tripack)
+library(DGEobj.utils)
+```
+
+Load the WS +/- GSKJ4 DESeq2 dataset.
+```{r}
+load(file='BigStuff/dds_final_GSKJ4.rda')
+```
+
+This is the function to annotate genes by Ensembl ID using BioMart.
+```{r}
+ensembl.annotate <- function(ensembl.id){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol','mgi_description'),
+               filters='ensembl_gene_id',
+               values=ensembl.id,
+               mart=ensembl102.mmusculus)
+  return(mgi)
+}
+```
+
+Create a dataframe that contains each sample's Alizarin quantification (absorbance at 405 nm). The samples must be in the same order as the columns of the count table. Easiest way to do this is to read the Alizarin quantifications in from the sample sheet (along with genotype, treatment, etc). The `dds_collapsed_GSKJ4.rda` object loaded earlier already has the quantifications included.
+```{r}
+alizarin <- data.frame(sample=gsub("_S.*", "", colnames(dds)),
+                       absorbance=as.numeric(levels(dds$alizarin))[dds$alizarin])
+head(alizarin)
+```
+
+Check the correlation for two genes - <i>Col1a1</i> should definitely be highly correlated to Alizarin quants, while <i>Gapdh</i> is housekeeping and should not really matter.
+```{r}
+counts.CPM <- convertCounts(counts(dds), unit='CPM', log=FALSE)
+cor(counts.CPM['ENSMUSG00000001506',], alizarin$absorbance) # Col1a1
+cor(counts.CPM['ENSMUSG00000057666',], alizarin$absorbance) # Gapdh
+```
+
+
+Make a function that takes an input of sample counts for a given gene, and runs the correlation coefficient against the sample Alizarin quants. Use this function to calculate the correlation coefficient per gene (row). Create a dataframe, `aliz.res.df` that has the Ensembl IDs and correlation coefficients.
+```{r}
+aliz.cor <- function(x){
+  cor(x, alizarin$absorbance)
+}
+
+aliz.res <- apply(counts.CPM,1,aliz.cor)
+aliz.res.df <- data.frame(ensembl_gene_id=names(aliz.res),
+                          coeff=unname(aliz.res))
+head(aliz.res.df)
+```
+
+```{r, include=FALSE eval=FALSE}
+load(file='mgi_condense.ensembl.rda')
+aliz.bmp.df <- aliz.res.df[which(aliz.res.df$ensembl_gene_id %in% mgi_condense.ensembl),]
+aliz.ost.df <- aliz.res.df[which(aliz.res.df$ensembl_gene_id %in% mgi_ost.condense.ensembl$gene_id),]
+
+mineral <- read.csv(file='GO_term_summary_20230406_124323.csv')
+mineral <- data.frame(Symbol=mineral[which(mineral$Annotated.Term=='positive regulation of bone mineralization'),]$Symbol) %>% distinct()
+mineral.ensembl <- get.ensembl(mineral$Symbol)
+aliz.min.df <- aliz.res.df[which(aliz.res.df$ensembl_gene_id %in% mineral.ensembl$gene_id),]
+```
+
+Annotate the genes by Ensembl ID.
+```{r}
+aliz.annotation <- ensembl.annotate(aliz.res.df$ensembl_gene_id)
+aliz.res.df <- merge(aliz.res.df, aliz.annotation, by='ensembl_gene_id', all=TRUE)
+save(aliz.res.df, file='aliz.res.df.rda')
+```
+
+Plot a histogram of the correlation coefficients. <i>I was expecting a normal distribution centered at 0, indicating most genes don't impact Alizarin staining. The right skew is a bit surprising?</i>
+```{r}
+hist(aliz.res.df$coeff, breaks=100,
+     xlab='Correlation coefficients',
+     main='Correl coeff of sample read counts to sample Alizarin quants')
+```
+
+Write a csv that has all genes with coefficients > 0.85.
+```{r}
+write.csv(aliz.res.df[which(aliz.res.df$coeff>0.85),], file='aliz.res.df.csv')
+```

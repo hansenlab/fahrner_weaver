@@ -1,0 +1,136 @@
+---
+title: "WS_RNAseq_MutGSKJ4-WtDMSO"
+author: "Christine Gao"
+date: "3/15/2023"
+output: html_document
+---
+
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+library(tripack)
+```
+
+Load dds object.
+```{r}
+load(file='dds_collapsed_GSKJ4.rda')
+```
+
+Set contrast for comparing MutGSKJ4 vs WtDMSO.
+```{r}
+mod_mat <- model.matrix(design(dds), colData(dds))
+res.MutGSKJ4.WtDMSO <- results(dds, contrast = list(c('genotype_Mut_vs_WT',
+                                                      'tx_GSKJ4_vs_DMSO',
+                                                      'genotypeMut.txGSKJ4')))
+```
+
+The p-value histogram signal is a bit lower than MutGSKJ4 vs Mut DMSO, or MutDMSO vs WtDMSO (peak density ~10). This is a good sign, but it's not decreased by much.
+```{r}
+hist(res.MutGSKJ4.WtDMSO$pvalue, breaks=40, freq=FALSE)
+```
+
+Call the contrast for MutDMSO vs WtDMSO, and get the list of differentially expressed genes in this comparison.
+```{r}
+res.MutDMSO.WtDMSO <- results(dds, contrast = list(c('genotype_Mut_vs_WT')))
+
+diffexp.MutDMSO.WtDMSO <- as.data.frame(res.MutDMSO.WtDMSO[which(res.MutDMSO.WtDMSO$padj < 0.1),])
+```
+
+How many of the diffexp genes from MutGSKJ4 vs WtDMSO are also diffexp in MutDMSO vs WtDMSO? i.e. how many genes that are significant due to Mut genotype are also diffexp when treating the Mut with GSKJ4? 
+```{r}
+diffexp.MutGSKJ4.WtDMSO <- as.data.frame(res.MutGSKJ4.WtDMSO[which(res.MutGSKJ4.WtDMSO$padj < 0.1),])
+
+table(rownames(diffexp.MutGSKJ4.WtDMSO) %in% rownames(diffexp.MutDMSO.WtDMSO))
+```
+
+And vice versa. Only about 1/3 of genes in each dataset are diffexp in both. It is possible that some of the genes that were diffexp due to Mut genotype are no longer significantly different after tx bc of reversal by GSKJ4. This would be the ideal interpretation, but it is difficult to draw this conclusion since lack of significance could also be due to high sample variance.
+```{r}
+table(rownames(diffexp.MutDMSO.WtDMSO) %in% rownames(diffexp.MutGSKJ4.WtDMSO))
+```
+
+For the 799 genes that are diffexp in both contrasts, plot their log2FCs. Ideally in a plot of <i>ALL</i> logFCs, the points would be spread along the x-axis, indicating that |log2FC| > 0 when comparing MutDMSO vs WtDMSO, but there is no sig diff when comparing MutGSKJ4 vs WtDMSO. That is not what is seen in this plot, but this is not unexpected since this plot selects for genes that must be diffexp in <i>both</i> contrasts, and genes with log2FC ~ 0 are generally not diffexp.
+```{r}
+sig.both <- rownames(diffexp.MutDMSO.WtDMSO)[rownames(diffexp.MutDMSO.WtDMSO) %in% 
+                                               rownames(diffexp.MutGSKJ4.WtDMSO)]
+sig.MutDMSO.WtDMSO <- rownames(diffexp.MutDMSO.WtDMSO)[!(rownames(diffexp.MutDMSO.WtDMSO) %in% 
+                                                           rownames(diffexp.MutGSKJ4.WtDMSO))]
+sig.MutGSKJ4.WtDMSO <- rownames(diffexp.MutGSKJ4.WtDMSO)[!(rownames(diffexp.MutGSKJ4.WtDMSO) %in% 
+                                                             rownames(diffexp.MutDMSO.WtDMSO))]
+log2FC.sig.both <- data.frame(ensembl=sig.both, 
+                              log2FC.MutDMSO.WtDMSO=res.MutDMSO.WtDMSO[which(
+                                rownames(res.MutDMSO.WtDMSO) %in% sig.both),]$log2FoldChange,
+                              log2FC.MutGSKJ4.WtDMSO=res.MutGSKJ4.WtDMSO[which(
+                                rownames(res.MutGSKJ4.WtDMSO) %in% sig.both),]$log2FoldChange)
+
+plot(log2FC.sig.both$log2FC.MutDMSO.WtDMSO, 
+     log2FC.sig.both$log2FC.MutGSKJ4.WtDMSO, 
+     pch=19, cex=0.75, col=alpha('gray50', 0.5),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs WtDMSO',
+     main='Genes significant in both')
+abline(a=0, b=1, col='blue')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+```
+
+Now make a similar plot but visualize genes that are only diffexp in MutDMSO vs WtDMSO. So there should be quite a few scattered about y=0 since there is no requirement that they also be diffexp in MutGSKJ4 vs WtDMSO. Presumably the genes far off from y=0 have high sample variation, and that is why they were insignificant. <i>It is surprisingly clean that no points fall on the other side of the x=y line, indicating that no diffexp genes in MutDMSO vs WtDMSO have a higher (but insignificant) log2FC when looking at MutGSKJ4 vs WtDMSO.</i>
+```{r}
+log2FC.sig.MutDMSO.WtDMSO <- data.frame(ensembl=sig.MutDMSO.WtDMSO,
+                                        log2FC.MutDMSO.WtDMSO=res.MutDMSO.WtDMSO[
+                                          which(rownames(res.MutDMSO.WtDMSO) %in% sig.MutDMSO.WtDMSO),
+                                          ]$log2FoldChange,
+                                        log2FC.MutGSKJ4.WtDMSO=res.MutGSKJ4.WtDMSO[
+                                          which(rownames(res.MutGSKJ4.WtDMSO) %in% sig.MutDMSO.WtDMSO),
+                                          ]$log2FoldChange)
+
+plot(log2FC.sig.MutDMSO.WtDMSO$log2FC.MutDMSO.WtDMSO, 
+     log2FC.sig.MutDMSO.WtDMSO$log2FC.MutGSKJ4.WtDMSO, 
+     pch=19, cex=0.75, col=alpha('gray50', 0.5),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs WtDMSO',
+     main='Genes significant in MutDMSO vs WtDMSO only')
+abline(a=0, b=1, col='blue')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+```
+
+In `Alizarin_correlation.Rmd`, I made a list of genes that have a high correlation with Alizarin staining. I want to see if these genes have higher expression in MutDMSO vs WtDMSO than in MutGSKJ4 vs WtDMSO. <i>(Although, the better way to look at this might be to check whether the Alizarin genes are diffexp in MutGSKJ4 vs MutDMSO, and then - whether the logFCs are negative)</i>
+<br>
+<br>
+As expected, Alizarin genes have a higher log2FC in MutDMSO vs WtDMSO. It is interesting that GSKJ4 tx resulted in some genes having a log2FC < 0 compared to WtDMSO, which could be interpreted as an overcorrection. This plot does not mean much though, bc it does not show whether the log2FC is statistically significant.
+```{r}
+load(file='aliz.res.df.rda')
+
+aliz.ensembl <- aliz.res.df[which(aliz.res.df$coeff > 0.85),]$ensembl_gene_id
+
+log2FC.aliz <- data.frame(ensembl=aliz.ensembl,
+                          log2FC.MutDMSO.WtDMSO=res.MutDMSO.WtDMSO[
+                            which(rownames(res.MutDMSO.WtDMSO) %in% aliz.ensembl),]$log2FoldChange,
+                          log2FC.MutGSKJ4.WtDMSO=res.MutGSKJ4.WtDMSO[
+                            which(rownames(res.MutGSKJ4.WtDMSO) %in% aliz.ensembl),]$log2FoldChange)
+
+plot(log2FC.aliz$log2FC.MutDMSO.WtDMSO, 
+     log2FC.aliz$log2FC.MutGSKJ4.WtDMSO, 
+     pch=19, cex=0.75, col=alpha('gray50', 0.5),
+     xlim=c(-1,2), ylim=c(-1,1),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs WtDMSO',
+     main='Genes with high Alizarin correlation')
+abline(a=0, b=1, col='blue')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+```
+
+Many of the Alizarin genes are indeed significant in the MutDMSO vs WtDMSO contrast, but they are insignificant when comparing MutGSKJ4 vs WtDMSO. This could be interpreted as "reversal" by GSKJ4, or as due to other factors such as high variance.
+```{r}
+table(res.MutDMSO.WtDMSO[which(rownames(res.MutDMSO.WtDMSO) %in% aliz.ensembl),]$padj < 0.1)
+table(res.MutGSKJ4.WtDMSO[which(rownames(res.MutGSKJ4.WtDMSO) %in% aliz.ensembl),]$padj < 0.1)
+```

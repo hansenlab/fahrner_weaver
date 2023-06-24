@@ -1,0 +1,258 @@
+---
+title: "scratch"
+author: "Christine Gao"
+date: "2/20/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Sanity checks for WS RNAseq +/- GSKJ4
+
+### Comparing to first RNAseq
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+```
+
+Load the results table from the 1st RNAseq (Mut vs WT).
+```{r}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
+load(file='dds_final.rda')
+res.old <- results(dds)
+```
+
+Load the results table from the 2nd RNAseq, calling contrast between MutDMSO and WtDMSO.
+```{r}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis")
+load(file='dds_collapsed_GSKJ4.rda')
+res.MutDMSO.WtDMSO <- results(dds, contrast = list(c('genotype_Mut_vs_WT')))
+```
+
+Most genes should exist in both datasets. Keep only the genes that exist in both and plot the corresponding log2FC. Highlight genes that are significant at padj<0.1 in both datasets.
+```{r}
+table(rownames(res.old) %in% rownames(res.MutDMSO.WtDMSO))
+intersect.old <- res.old[which(rownames(res.old) %in% rownames(res.MutDMSO.WtDMSO)==TRUE),]
+intersect.MutDMSO.WtDMSO <- res.MutDMSO.WtDMSO[which(rownames(res.MutDMSO.WtDMSO) %in% rownames(res.old)==TRUE),]
+tab <- data.frame(log2FC.1=intersect.old$log2FoldChange, log2FC.2=intersect.MutDMSO.WtDMSO$log2FoldChange)
+rownames(tab) <- rownames(intersect.old)
+
+gene_ids.old <- rownames(intersect.old[which(intersect.old$padj<0.1),])
+gene_ids.MutDMSO.WtDMSO <- rownames(intersect.MutDMSO.WtDMSO[which(intersect.MutDMSO.WtDMSO$padj<0.1),])
+gene_ids <- gene_ids.old[gene_ids.old %in% gene_ids.MutDMSO.WtDMSO]
+#gene_ids <- union(gene_ids.old, gene_ids.MutDMSO.WtDMSO)
+
+
+plot(intersect.old$log2FoldChange, intersect.MutDMSO.WtDMSO$log2FoldChange, 
+     pch=16, cex=0.75, col=alpha('gray50',0.5),
+     xlim=c(-4,3), ylim=c(-4,4),
+     xlab='log2FC, D14 Mut vs Wt', ylab='log2FC, D21 MutDMSO vs WtDMSO')
+points(tab[gene_ids, ], pch = 16, cex = 0.75, col ='orange')
+abline(h=0, v=0, col='red', lty=2)
+# dev.copy2pdf(file='plots_final/log2FC_untreated_MutDMSO.WtDMSO_sig-only.pdf')
+```
+
+
+Mark the genes that 1. exist in both datasets, and 2. are significantly differentially expressed in the old dataset (Mut vs WT).
+```{r}
+plot(intersect.old$log2FoldChange, intersect.MutDMSO.WtDMSO$log2FoldChange, 
+     pch=19, cex=0.5, col='gray50',
+     xlab='log2FC, Mut vs WT', ylab='log2FC, MutDMSO vs WtDMSO')
+points(tab[gene_ids.old, ], pch = 19, cex = 0.5, col ='red')
+abline(h=0, v=0, col='red', lty=2)
+```
+
+Mark the genes that 1. exist in both datasets, and 2. are significantly differentially expressed in the MutDMSO vs WtDMSO dataset.
+```{r}
+plot(intersect.old$log2FoldChange, intersect.MutDMSO.WtDMSO$log2FoldChange, 
+     pch=19, cex=0.5, col='gray50',
+     xlab='log2FC, Mut vs WT', ylab='log2FC, MutDMSO vs WtDMSO')
+points(tab[gene_ids.MutDMSO.WtDMSO, ], pch = 19, cex = 0.5, col ='deepskyblue')
+abline(h=0, v=0, col='red', lty=2)
+```
+
+Overlay all 3 plots
+```{r}
+plot(intersect.old$log2FoldChange, intersect.MutDMSO.WtDMSO$log2FoldChange, 
+     pch=19, cex=0.5, col='gray50',
+     xlab='log2FC, Mut vs WT', ylab='log2FC, MutDMSO vs WtDMSO')
+points(tab[gene_ids.old, ], pch = 19, cex = 0.5, col = 'red')
+points(tab[gene_ids.MutDMSO.WtDMSO, ], pch = 19, cex = 0.5, col = 'deepskyblue')
+points(tab[gene_ids, ], pch = 19, cex = 0.5, col ='purple')
+abline(h=0, v=0, col='red', lty=2)
+legend <- legend('bottomleft', legend=c('sig in Mut vs WT','sig in MutDMSO vs WtDMSO','sig in both'),
+                   col=c('red','deepskyblue','purple'), lty=c(NA,NA,NA), pch=c(19,19,19), lwd=c(NA,NA,NA), cex=1, bty='n')
+```
+
+Note that there are much fewer significant genes in the 1st RNAseq.
+```{r}
+table(gene_ids.old %in% gene_ids.MutDMSO.WtDMSO)
+table(gene_ids.MutDMSO.WtDMSO %in% gene_ids.old)
+```
+
+Check the expression level (mean counts) in Wt and WtDMSO samples. Overall they appear correlated.
+```{r}
+library(scales)
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
+load(file='dds_final.rda')
+counts.Wt <- counts(dds)[,dds$condition=='WT']
+
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
+load(file='dds_final_GSKJ4.rda')
+counts.WtDMSO <- counts(dds)[,dds$genotype=='WT' & dds$tx=='DMSO']
+
+intersect.counts.Wt <- counts.Wt[rownames(counts.Wt) %in% rownames(counts.WtDMSO),]
+intersect.counts.WtDMSO <- counts.WtDMSO[rownames(counts.WtDMSO) %in% rownames(counts.Wt),]
+
+quartz()
+par(pty='s')
+par(mar=c(1.4,1.1,0,0), mgp=c(0.5,0,0))
+plot(apply(intersect.counts.Wt,1,mean), apply(intersect.counts.WtDMSO,1,mean), log='xy',
+     pch=16, cex=0.3, col=alpha('gray50', 0.4), cex.axis=0.7, xlab='', ylab='', xaxt='n', yaxt='n')
+atx <- axTicks(1)
+aty <- axTicks(2)
+axis(1, at=atx, labels=seq(1:6), tck=-0.02, cex.axis=0.7)
+axis(2, at=aty, labels=seq(1:6), tck=-0.02, cex.axis=0.7)
+mtext('log(Mean counts, +/+)', side=1, line=0.5, cex=0.7)
+mtext('log(Mean counts, +/+ DMSO)', side=2, line=0.5, cex=0.7)
+dev.copy2pdf(file='plots_final/mean-counts_Wt_WtDMSO.pdf', width=2, height=2)
+
+library(DGEobj.utils)
+logCPM.old.WT <- convertCounts(counts.Wt, unit='CPM', log=TRUE)
+quartz()
+par(mar=c(1.4,1.3,0.1,0), mgp=c(0.5,0.05,0))
+plot(apply(logCPM.old.WT,1,mean),
+     sqrt(apply(logCPM.old.WT,1,sd)),
+     pch=16, cex=0.3, col=alpha('gray50', 0.4),
+     ylim=c(0,2.5), xlim=c(-5,16),
+     xlab='', ylab='', xaxt='n', yaxt='n', bty='n', main='')
+lines(lowess(apply(logCPM.old.WT,1,mean),
+       sqrt(apply(logCPM.old.WT,1,sd)), f=2/3), col='red', lwd=2)
+atx <- axTicks(1)
+aty <- axTicks(2)
+axis(1, at=atx, labels=seq(-5,15,by=5), tck=-0.02, cex.axis=0.7)
+axis(2, at=aty, labels=seq(0,2.5, by=0.5), tck=-0.02, cex.axis=0.7)
+mtext('mean(logCPM)', side=1, line=0.5, cex=0.7)
+mtext('sqrt(sd(logCPM))', side=2, line=0.6, cex=0.7)
+dev.copy2pdf(file='plots_final/mean-var_untreated-Wt.pdf', width=2, height=2)
+
+logCPM.WtDMSO <- convertCounts(counts.WtDMSO, unit='CPM', log=TRUE)
+quartz()
+par(mar=c(1.4,1.3,0.1,0), mgp=c(0.5,0.05,0))
+plot(apply(logCPM.WtDMSO,1,mean),
+     sqrt(apply(logCPM.WtDMSO,1,sd)),
+     pch=16, cex=0.3, col=alpha('gray50', 0.4),
+     ylim=c(0,2.5), xlim=c(-5,16),
+     xlab='', ylab='', xaxt='n', yaxt='n', bty='n', main='')
+lines(lowess(apply(logCPM.WtDMSO,1,mean),
+       sqrt(apply(logCPM.WtDMSO,1,sd)), f=2/3), col='blue', lwd=2)
+atx <- axTicks(1)
+aty <- axTicks(2)
+axis(1, at=atx, labels=seq(-5,15,by=5), tck=-0.02, cex.axis=0.7)
+axis(2, at=aty, labels=seq(0,2.5, by=0.5), tck=-0.02, cex.axis=0.7)
+mtext('mean(logCPM)', side=1, line=0.5, cex=0.7)
+mtext('sqrt(sd(logCPM))', side=2, line=0.6, cex=0.7)
+dev.copy2pdf(file='plots_final/mean-var_WtDMSO.pdf', width=2, height=2)
+
+quartz()
+par(mar=c(1.4,1.3,0.1,0), mgp=c(0.5,0.05,0))
+plot.new()
+plot.window(ylim=c(0,2.5), xlim=c(-5,16))
+lines(lowess(apply(logCPM.old.WT,1,mean),
+       sqrt(apply(logCPM.old.WT,1,sd)), f=2/3), col='red', lwd=2)
+lines(lowess(apply(logCPM.WtDMSO,1,mean),
+       sqrt(apply(logCPM.WtDMSO,1,sd)), f=2/3), col='blue', lwd=2)
+axis(1, at=atx, labels=seq(-5,15,by=5), tck=-0.02, cex.axis=0.7)
+axis(2, at=aty, labels=seq(0,2.5, by=0.5), tck=-0.02, cex.axis=0.7)
+mtext('mean(logCPM)', side=1, line=0.5, cex=0.7)
+mtext('sqrt(sd(logCPM))', side=2, line=0.6, cex=0.7)
+dev.copy2pdf(file='plots_final/mean-var_overlay.pdf', width=2, height=2)
+
+```
+
+
+Plot the histogram of MutDMSO vs WtDMSO p-values for the 190 genes that were differentially expressed in the Mut vs Wt dataset
+```{r}
+hist(res.MutDMSO.WtDMSO[rownames(intersect.old[intersect.old$padj<0.1,]),]$pvalue, 
+     breaks=40, freq=FALSE,
+     xlab='p-values, MutDMSO vs WtDMSO', main='Sig genes in Mut vs Wt')
+```
+
+Plot the histogram of Mut vs Wt p-values for the 2651 genes that were differentially expressed in the MutDMSO vs WtDMSO dataset
+```{r}
+# setEPS()
+# postscript('plots_final/pval-hist_D14_MutDMSO.WtDMSO.eps')
+hist(res.old[rownames(intersect.MutDMSO.WtDMSO[intersect.MutDMSO.WtDMSO$padj<0.1,]),]$pvalue, 
+     breaks=40, freq=FALSE,
+     xlab='p-values, D14 Mut vs Wt', main='Sig genes in D21 MutDMSO vs WtDMSO')
+# dev.off()
+```
+
+
+## Effect of GSKJ4 in Mut
+
+```{r}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis")
+load(file='dds_collapsed_GSKJ4.rda')
+res.MutGSKJ4.MutDMSO <- results(dds, contrast = list(c('tx_GSKJ4_vs_DMSO',
+                                                       'genotypeMut.txGSKJ4')))
+```
+
+## Effect of GSKJ4 in Wt
+
+```{r}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis")
+load(file='dds_collapsed_GSKJ4.rda')
+res.WtGSKJ4.WtDMSO <- results(dds, contrast = list(c('tx_GSKJ4_vs_DMSO')))
+```
+
+How many genes that are differentially expressed due to GSKJ4 are shared between genotypes? (i.e. what is the general effect of the drug)
+```{r}
+diffexp.MutGSKJ4.MutDMSO <- as.data.frame(res.MutGSKJ4.MutDMSO[which(res.MutGSKJ4.MutDMSO$padj <0.1),])
+diffexp.WtGSKJ4.WtDMSO <- as.data.frame(res.WtGSKJ4.WtDMSO[which(res.WtGSKJ4.WtDMSO$padj <0.1),])
+table(rownames(diffexp.MutGSKJ4.MutDMSO) %in% rownames(diffexp.WtGSKJ4.WtDMSO))
+table(rownames(diffexp.WtGSKJ4.WtDMSO) %in% rownames(diffexp.MutGSKJ4.MutDMSO))
+```
+
+
+## ?Phenotype reversion in MutGSKJ4 to WtDMSO
+
+```{r}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis")
+load(file='dds_collapsed_GSKJ4.rda')
+res.MutGSKJ4.WtDMSO <- results(dds, contrast = list(c('genotype_Mut_vs_WT',
+                                                       'tx_GSKJ4_vs_DMSO',
+                                                       'genotypeMut.txGSKJ4')))
+```
+
+## P-value histograms
+Comparing MutDMSO vs WtDMSO:
+```{r}
+hist(res.MutDMSO.WtDMSO$pvalue, freq=FALSE, breaks=40,
+     xlab='p-values', main='MutDMSO vs WtDMSO')
+```
+
+Comparing MutGSKJ4 vs MutDMSO:
+```{r}
+hist(res.MutGSKJ4.MutDMSO$pvalue, freq=FALSE, breaks=40,
+     xlab='p-values', main='MutGSKJ4 vs MutDMSO')
+```
+
+Comparing MutGSKJ4 vs WtDMSO:
+```{r}
+hist(res.MutGSKJ4.WtDMSO$pvalue, freq=FALSE, breaks=40,
+     xlab='p-values', main='MutGSKJ4 vs WtDMSO')
+```

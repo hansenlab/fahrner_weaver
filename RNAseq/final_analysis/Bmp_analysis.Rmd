@@ -1,0 +1,533 @@
+---
+title: "Bmp analysis"
+author: "Christine Gao"
+date: "3/23/2023"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r, include=FALSE}
+library(EnsDb.Mmusculus.v79)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(dplyr)
+library(DESeq2)
+library(biomaRt)
+library(KEGGREST)
+library(stringr)
+library(scales)
+```
+
+Function for retrieving Ensembl IDs, given a vector of gene names. Returns a dataframe of successfully-retrieved gene names and corresponding Ensembl IDs. <i>**Genes for which an Ensembl ID could not be found are left out.</i>
+```{r}
+get.ensembl <- function(x) {
+  edb_mouse <- EnsDb.Mmusculus.v79
+  proms_mouse <- promoters(edb_mouse, 
+                           filter = TxBiotypeFilter("protein_coding"), 
+                           upstream = 2000, 
+                           downstream = 2000, 
+                           columns = c("gene_name", "tx_id", "gene_id"))
+  genome(seqinfo(proms_mouse)) <- "mm10"
+  seqlevelsStyle(proms_mouse) <- "ucsc"
+  proms_mouse <- proms_mouse[which(seqnames(proms_mouse) %in% seqnames(Mmusculus)[1:21])]
+  proms_mouse$gene_name <- toupper(proms_mouse$gene_name)
+
+  x <- toupper(x)
+  x <- unique(x)
+  ensembl.ids <- as.data.frame(
+    unique(proms_mouse[which(proms_mouse$gene_name %in% x), c('gene_name','gene_id')]),
+    row.names=NULL)
+  ensembl.ids <- ensembl.ids[, c('gene_name','gene_id')] %>% distinct()
+  return(ensembl.ids)
+}
+```
+
+Function for retrieving gene names, given a vector of Ensembl IDs. Returns a dataframe containing both Ensembl IDs and corresponding genes. <i>**Leaves out Ensembl IDs for which a gene name could not be found.</i>
+```{r}
+get.gene <- function(x){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol'),
+               filters='ensembl_gene_id',
+               values=x,
+               mart=ensembl102.mmusculus)
+  genes <- data.frame(ensembl_gene_id=x)
+  genes <- merge(genes, mgi, by='ensembl_gene_id')
+  return(genes)
+}
+```
+
+Function for making volcano plots. 
+```{r}
+makeVolcanoPlot <- function(DEgenes_df, lfc_cutoff, fdr, gene_ids, circ_ids, circ_names, ylim, color){
+  tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
+  rownames(tab) <- rownames(DEgenes_df)
+  par(mar=c(5,5,5,5))
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.5, 
+       xlab = expression(log[2]~fold~change),
+       ylab = expression(-log[10]~pvalue), 
+       cex.axis=1.5,
+       cex.lab=1.5,
+       col = "gray60", bty = 'l', 
+       xlim = c(min(tab$logFC), max(tab$logFC)), 
+       ylim = c(0, ylim))
+  points(tab[gene_ids, ], pch = 19, cex = 0.5, col = color)
+  # points(tab[circ_ids, ], pch = 1, cex = 1.5, col= 'black')
+
+  text(tab[circ_ids, ]$logFC-0.15, tab[circ_ids, ]$negLogPval, 
+       labels=circ_names, adj=1, cex = 0.5, col='black')
+ 
+  abline(h=-log10(fdr), col='red', lty=2, lwd=2)
+
+  if (lfc_cutoff != "none"){
+    abline(v = c(-lfc_cutoff, lfc_cutoff), col = rgb(0,0,0,0.75), lty = "longdash", lwd = 1) 
+  }
+}
+```
+
+Function for making volcano plots, modified to color two groups.
+```{r}
+makeVolcanoPlot2 <- function(DEgenes_df, lfc_cutoff, fdr, gene_ids1, gene_ids2, 
+                             circ_ids, circ_names, ylim, color1, color2, legend_place){
+  tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
+  rownames(tab) <- rownames(DEgenes_df)
+  par(mar=c(5,5,5,5))
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.5, 
+       xlab = expression(log[2]~fold~change),
+       ylab = expression(-log[10]~pvalue), 
+       cex.axis=1.5,
+       cex.lab=1.5,
+       col = "gray60", bty = 'l', 
+       xlim = c(min(tab$logFC), max(tab$logFC)), 
+       ylim = c(0, ylim))
+  points(tab[gene_ids1, ], pch = 19, cex = 0.5, col = color1)
+  points(tab[gene_ids2, ], pch = 19, cex = 0.5, col = color2)
+
+  text(tab[circ_ids, ]$logFC-0.15, tab[circ_ids, ]$negLogPval, 
+       labels=circ_names, adj=1, cex = 0.5, col='black')
+  
+  legend <- legend(legend_place, legend=c('Bmp pos reg','Bmp neg reg','other'),
+                   col=c(color1,color2,'gray60'), 
+                   lty=c(NA,NA,NA), pch=c(19,19,19), lwd=c(NA,NA,NA), cex=0.75, bty='n')
+ 
+  abline(h=-log10(fdr), col='red', lty=2, lwd=2)
+
+  if (lfc_cutoff != "none"){
+    abline(v = c(-lfc_cutoff, lfc_cutoff), col = rgb(0,0,0,0.75), lty = "longdash", lwd = 1) 
+  }
+}
+```
+
+Function for making Wilcoxon rank sum test stat histograms.
+```{r}
+wilcox.hist <- function(permutation, rank, pval, title, color){
+  hist(permutation, col = "gray60", lty = 0, 
+       breaks = 100, freq = FALSE, xlab = "Wilcoxon rank-sum test stat", cex.lab = 1.2, yaxt = 'n',
+       main = title,
+       cex.main = 1.2, font.main = 1, 
+       xlim = c(rank-50000, max(permutation)+0.05), xaxt = 'n')
+  axis(1, at = c(round(quantile(permutation, c(0.01, 0.99)))), cex.axis = 1.1)
+  axis(2, at = c(0, 0.000008), cex.axis = 1.1)
+  abline(v = rank, col = color, lwd = 3)
+  text(rank+10000, 0.000007,paste('p =', pval), adj=0, col = color)
+  legend <- legend("topright", legend = c("random", "observed"), 
+                   col = c("gray60", color), bty = 'n', 
+                   cex = 1, lty = "solid", lwd = 3)
+}
+```
+
+Function for making Wilcoxon rank sum test stat histograms FOR PAPER FIGURES.
+```{r}
+wilcox.hist.figure <- function(permutation, rank, pval, title, color){
+  par(mar=c(1.6,1,0,0), mgp=c(0.5,0.075,0))
+  hist(permutation, col = "gray60", lty = 0, 
+       breaks = 100, freq = FALSE, xlab = '', ylab='', yaxt = 'n',
+       main = '',
+       cex.main = 1.2, font.main = 1, 
+       xlim = c(rank-50000, max(permutation)+0.05), xaxt = 'n')
+  axis(1, at = c(round(quantile(permutation, c(0.01, 0.99)))), tck=-0.02, cex.axis = 0.7)
+  axis(2, at = c(0, 0.000006), tck=-0.02, cex.axis = 0.7)
+  mtext('Wilcoxon test stat', side=1, line=0.7, cex=0.7)
+  mtext('Density', side=2, line=0.3, adj=0.4, cex=0.7)
+  abline(v = rank, col = color, lwd = 2.5)
+  text(rank+10000, 0.000006,paste('p =', pval), adj=0, col = 'black', cex=0.7)
+}
+```
+
+Function for making volcano plots FOR PAPER FIGURES.
+```{r}
+makeVolcanoPlot.figure <- 
+  function(DEgenes_df, lfc_cutoff, fdr, gene_ids, circ_ids, circ_names, ylim, color){
+  tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
+  rownames(tab) <- rownames(DEgenes_df)
+  par(mar=c(1.4,1.3,0.2,0), mgp=c(0.5,0,0))
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.25, 
+       xlab='',
+       ylab='',
+       axes = FALSE,
+       col = "gray60", bty = 'l', 
+       xlim = c(min(tab$logFC), max(tab$logFC)), 
+       ylim = c(0, ylim))
+  points(tab[gene_ids, ], pch = 19, cex = 0.3, col = color)
+  # points(tab[circ_ids, ], pch = 1, cex = 1.5, col= 'black')
+  axis(1, seq(-6,2, by=2), tck=-0.02, cex.axis=0.7)
+  axis(2, seq(0,10, by=2), tck=-0.02, cex.axis=0.7)
+  mtext(expression(log[2]~fold~change), side=1, line=0.6, cex=0.7)
+  mtext(expression(-log[10]~pvalue), side=2, line=0.6, cex=0.7)
+
+  text(tab[circ_ids, ]$logFC-0.2, tab[circ_ids, ]$negLogPval, adj=1, cex = 0.6, col='black',font=3,
+       labels=circ_names)
+ 
+  abline(h=-log10(fdr), col='red', lty=2, lwd=1)
+
+  if (lfc_cutoff != "none"){
+    abline(v = c(-lfc_cutoff, lfc_cutoff), col = rgb(0,0,0,0.75), lty = "longdash", lwd = 1) 
+  }
+}
+```
+
+<br>
+Load MGI GO annotations for <b>0030509 BMP signaling pathway</b>. This file also includes annotation terms that are related to 'BMP signaling pathway'. Many genes have multiple annotation terms and entries, so these need to be condensed.
+```{r class.source='fold-show'}
+mgi_go <- read.csv('GO_term_summary_20230323_111207.csv')
+mgi_go <- data.frame(Symbol=mgi_go$Symbol, Name=mgi_go$Name, Annotated.Term=mgi_go$Annotated.Term)
+mgi_condense <- mgi_go %>% distinct()
+```
+
+<br>
+Keep entries with the following annotation terms. Note that this still includes some gene duplicates, e.g. if a gene is annotated as both 'BMP signaling pathway' and 'regulation of BMP signaling pathway'.
+```{r class.source='fold-show'}
+mgi_condense <- mgi_condense[which(mgi_condense$Annotated.Term %in%
+                                     c('BMP signaling pathway',
+                                       'negative regulation of BMP signaling pathway',
+                                       'positive regulation of BMP signaling pathway',
+                                       'regulation of BMP signaling pathway',
+                                       'sequestering of BMP from receptor via BMP binding',
+                                       'sequestering of BMP in extracellular matrix')),]
+```
+
+<br>
+We are interested whether individual genes can be classified as positive or negative regulators of the Bmp pathway. Some genes already have directionality annotated, and these are set aside in the vectors `pos.reg` and `neg.reg`. Genes that do not belong to either `pos.reg` or `neg.reg` are placed in a csv file `dir.unannotated.csv` for manual annotation. 
+```{r class.source='fold-show'}
+pos.reg <- mgi_condense$Symbol[which(mgi_condense$Annotated.Term==
+                                       'positive regulation of BMP signaling pathway')]
+neg.reg <- mgi_condense$Symbol[which(mgi_condense$Annotated.Term==
+                                       'negative regulation of BMP signaling pathway')]
+dir.unannotated <- mgi_condense$Symbol[which(!(mgi_condense$Symbol %in% c(pos.reg,neg.reg)))]
+mgi_condense.dir.unannotated <- mgi_condense[which(mgi_condense$Symbol %in% dir.unannotated),]
+write.csv(mgi_condense.dir.unannotated, file='dir.unannotated.csv')
+```
+
+<br>
+Load manual annotations and append to existing `pos.reg` and `neg.reg` vectors. <i>**Manual annotations are incomplete! <b>Genes that have not been assigned directionality, such as Tgfb1, are left out of subsequent analyses if using these gene lists downstream!</b></i>
+```{r class.source='fold-show'}
+mgi_condense.dir.annotated <- read.csv(file='dir.annotated.csv')
+pos.reg <- unique(append(pos.reg,
+                         mgi_condense.dir.annotated[which(
+                           mgi_condense.dir.annotated$Manual=='pos'),]$Symbol))
+neg.reg <- unique(append(neg.reg,
+                         mgi_condense.dir.annotated[which(
+                           mgi_condense.dir.annotated$Manual=='neg'),]$Symbol))
+
+pos.reg.ensembl <- get.ensembl(pos.reg)$gene_id
+neg.reg.ensembl <- get.ensembl(neg.reg)$gene_id
+```
+
+<br>
+Load untreated RNAseq.
+```{r class.source='fold-show'}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
+load(file='dds_final.rda')
+res <- results(dds)
+```
+
+<br>
+Make a volcano plot of the untreated RNAseq data, highlighting the `mgi_condense` gene list (all MGI genes annotated with one of the above six terms, irrespective of directionality) <i> (left plot)</i>.
+<br>
+This looks very different from the volcano plot using the old Bmp pathway gene list <i>(right plot)</i>. The old Bmp gene list includes many more genes that meet the FDR threshold.
+```{r fig.width=12}
+mgi_condense.ensembl <- get.ensembl(mgi_condense$Symbol)$gene_id
+# save(mgi_condense.ensembl, file='mgi_condense.ensembl.rda')
+circ_ids <- rownames(res[which(rownames(res) %in% mgi_condense.ensembl &
+                                 res$padj<0.1),])
+circ_names <- get.gene(circ_ids)$mgi_symbol
+
+#par(mfrow=c(1,2))
+setEPS()
+postscript('plots_final/volcano_Bmp_untreated.eps', width=1.96, height=1.96)
+makeVolcanoPlot.figure(res, 
+                "none", fdr=0.00139149,
+                mgi_condense.ensembl, 
+                circ_ids, circ_names, 
+                ylim=10, "magenta")
+dev.off()
+
+load(file='gene_ids_bmp.rda')
+makeVolcanoPlot(res, 
+                "none", fdr=0.00139149,
+                gene_ids, 
+                circ_ids, circ_names, 
+                ylim=10, "magenta")
+```
+
+<br>
+Re-running the Wilcoxon rank-sum test stat (+10000 simulated iterations) using the `mgi_condense` gene list still gets a significant p-value, indicating that the pathway described by `mgi_condense` is collectively perturbed compared to a selection of 161 genes at random.
+
+```{r eval=FALSE}
+pathway <- mgi_condense.ensembl
+rank_WS <- wilcox.test(res$pvalue[which(rownames(res) %in% pathway)], 
+                       res$pvalue[-which(rownames(res) %in% pathway)])$statistic
+
+length1 <- length(which(rownames(res) %in% pathway))
+
+permutation_rank_Bmp2 <- replicate(10000, {
+  indices <- sample(1:length(rownames(res)), length1)
+  wilcox.test(res$pvalue[indices], res$pvalue[-indices])$statistic
+  })
+
+save(permutation_rank_Bmp2, file='permutation_rank_Bmp2_MGI.rda')
+```
+
+Load saved data from the 10000 iterations.
+```{r class.source='fold-show'}
+pathway <- mgi_condense.ensembl
+rank_bmp <- wilcox.test(res$pvalue[which(rownames(res) %in% pathway)],
+                        res$pvalue[-which(rownames(res) %in% pathway)])$statistic
+load(file='permutation_rank_Bmp2_MGI.rda')
+prop.table(table(permutation_rank_Bmp2<rank_bmp))
+```
+
+Histogram of the Wilcoxon rank-sum test simulation using the `mgi_condense` gene list.
+```{r}
+pval.bmp <- unname(prop.table(table(permutation_rank_Bmp2<rank_bmp))[2])
+
+par(mfrow=c(1,1))
+# setEPS()
+# postscript('plots_final/wilcox_BMP_untreated.eps', width=1.96, height=1.96)
+wilcox.hist.figure(permutation_rank_Bmp2, 
+                   rank_bmp, 
+                   pval.bmp, 
+                   'MGI BMP signaling pathway', 
+                   'magenta')
+# dev.off()
+```
+
+The MGI list should be decent quality, but this should also be checked against other databases. This compares the MGI list to the KEGG 'TGF-beta signaling pathway' for <i>M. musculus</i> (<b>mmu04350</b>): https://www.kegg.jp/pathway/mmu04350. KEGG does not have a Bmp specific pathway, and the two are intertwined such that it is difficult to examine one in isolation. 
+```{r class.source='fold-show'}
+kegg.bmp <- keggGet('mmu04350')[[1]]$GENE
+kegg.bmp.odd <- kegg.bmp[seq(0,length(kegg.bmp),2)]
+kegg.bmp.names <- gsub("\\;.*","", kegg.bmp.odd)
+table(kegg.bmp.names %in% mgi_condense$Symbol)
+```
+
+List the genes that are present in KEGG but missing from MGI.
+```{r}
+kegg.bmp.names[which(!(kegg.bmp.names %in% mgi_condense$Symbol))]
+```
+
+<br>
+Another pathway database is Reactome, which has a 'Signaling by BMP' pathway for <i>M. musculus</i> (<b>R-MMU-201451.1</b>): https://reactome.org/PathwayBrowser/#/R-MMU-201451&PATH=R-MMU-162582,R-MMU-9006936. Some pre-processing of this data has to be done since it gives Uniprot IDs instead of gene names.
+```{r class.source='fold-show'}
+reactome <- read.csv(file='reactome_signaling-by-bmp-mmusculus.csv')
+reactome.bmp.names <- reactome$Gene.Names %>% word()
+table(reactome.bmp.names %in% mgi_condense$Symbol)
+```
+
+List the genes that are present in Reactome but missing from MGI.
+```{r}
+reactome.bmp.names[which(!(reactome.bmp.names %in% mgi_condense$Symbol))]
+```
+
+Do the same thing using the Reactome 'Signaling by TGFB family members' for <i>M. musculus</i> (<b>R-MMU-9006936.1</b>): https://reactome.org/PathwayBrowser/#/R-MMU-9006936&PATH=R-MMU-162582.
+```{r class.source='fold-show'}
+reactome.tgf <- read.csv(file='reactome_signaling-by-tgfbeta-mmusculus.csv')
+reactome.tgf.names <- reactome.tgf$Gene.Names %>% word()
+table(reactome.tgf.names %in% mgi_condense$Symbol)
+reactome.tgf.names[which(!(reactome.tgf.names %in% mgi_condense$Symbol))]
+```
+
+<br>
+The old osteogenesis gene list was generated from review papers and Pubmed searches (?). Given the different results that were seen with the Bmp pathway, it would be good to re-analyze using a curated MGI gene list, in this case for <b>0001649 osteoblast differentiation</b>: https://www.informatics.jax.org/go/term/GO:0001649. Again, this includes several related annotations as well, seen below.
+```{r class.source='fold-show'}
+mgi_ost <- read.csv(file='GO_term_summary_20230325_181053.csv')
+mgi_ost <- mgi_ost[which(!(mgi_ost$Qualifier=='NOT')),]
+table(mgi_ost$Annotated.Term)
+mgi_ost.condense <- data.frame(Symbol=mgi_ost$Symbol, Name=mgi_ost$Name) %>% distinct()
+
+mgi_ost.condense.ensembl <- get.ensembl(mgi_ost.condense$Symbol)
+save(mgi_ost.condense.ensembl, file='mgi_ost.condense.ensembl.rda')
+```
+
+<br>
+A number of the osteoblast differentiation genes are also part of the MGI BMP signalling pathway.
+```{r}
+table(mgi_ost.condense$Symbol %in% mgi_condense$Symbol)
+```
+
+```{r class.source='fold-show', eval=FALSE}
+pathway <- mgi_ost.condense.ensembl$gene_id
+rank_ost <- wilcox.test(res$pvalue[which(rownames(res) %in% pathway)],
+                        res$pvalue[-which(rownames(res) %in% pathway)])$statistic
+
+length1 <- length(which(rownames(res) %in% pathway))
+
+permutation_rank_ost <- replicate(10000, {
+  indices <- sample(1:length(rownames(res)), length1)
+  wilcox.test(res$pvalue[indices], res$pvalue[-indices])$statistic
+  })
+
+save(permutation_rank_ost, file='permutation_rank_ost_MGI.rda')
+```
+
+<br>
+Surprisingly, the MGI 'osteoblast differentiation' gene list is collectively dyregulated, whereas using the old osteogenesis gene list was non-significant.
+```{r}
+load(file='permutation_rank_ost_MGI.rda')
+pathway <- mgi_ost.condense.ensembl$gene_id
+rank_ost <- wilcox.test(res$pvalue[which(rownames(res) %in% pathway)], 
+                        res$pvalue[-which(rownames(res) %in% pathway)])$statistic
+pval.ost <- unname(prop.table(table(permutation_rank_ost<rank_ost))[2])
+```
+
+```{r}
+# setEPS()
+# postscript('plots_final/wilcox_ost_untreated.eps', width=1.96, height=1.96)
+wilcox.hist.figure(permutation_rank_ost, 
+                   rank_ost, 
+                   pval.ost, 
+                   'MGI osteoblast differentiation', 
+                   'deepskyblue')
+# dev.off()
+```
+
+Make a volcano plot, highlighting the MGI osteoblast differentiation genes.
+```{r fig.width=10, fig.height=8}
+circ_ids <- rownames(res[which(rownames(res) %in% mgi_ost.condense.ensembl$gene_id &
+                                 res$padj<0.1),])
+circ_names <- get.gene(circ_ids)$mgi_symbol
+
+# setEPS()
+# postscript('plots_final/volcano_ost_untreated.eps', width=1.96, height=1.96)
+makeVolcanoPlot.figure(res, 
+                "none", fdr=0.00139149,
+                mgi_ost.condense.ensembl$gene_id, 
+                circ_ids, circ_names, 
+                ylim=10, "deepskyblue")
+# dev.off()
+```
+
+Now looking at the WS +/- GSKJ4 RNAseq, it would be interesting to see where the MGI Bmp pathway genes fall on volcano plots when calling the MutDMSO vs WtDMSO contrast, compared to the MutGSKJ4 vs MutDMSO contrast. Almost all of the significant Bmp genes in MutGSKJ4 vs MutDMSO are downregulated, as opposed to a fairly even up/downregulation distribution in MutDMSO vs WtDMSO.
+```{r class.source='fold-show'}
+load(file='dds_collapsed_GSKJ4.rda')
+mod_mat <- model.matrix(design(dds), colData(dds))
+res.MutGSKJ4.MutDMSO <- results(dds, contrast = list(c('tx_GSKJ4_vs_DMSO',
+                                      'genotypeMut.txGSKJ4')))
+res.MutDMSO.WtDMSO <- results(dds, contrast = list(c('genotype_Mut_vs_WT')))
+```
+
+```{r fig.width=12}
+fdr <- res.MutDMSO.WtDMSO[which(res.MutDMSO.WtDMSO$padj>0.1 
+                                  & is.na(res.MutDMSO.WtDMSO$padj)==FALSE),]
+fdr <- fdr[which(fdr$padj==min(fdr$padj)),]$pvalue
+
+mgi_condense.ensembl <- get.ensembl(mgi_condense$Symbol)$gene_id
+
+circ_ids <- rownames(res.MutDMSO.WtDMSO[which(
+  rownames(res.MutDMSO.WtDMSO) %in% mgi_condense.ensembl &
+    res.MutDMSO.WtDMSO$padj<0.1),])
+circ_names <- get.gene(circ_ids)$mgi_symbol
+
+par(mfrow=c(1,2))
+makeVolcanoPlot(res.MutDMSO.WtDMSO, 
+                "none", fdr,
+                mgi_condense.ensembl, 
+                circ_ids, circ_names='', 
+                ylim=10, "magenta")
+title('MutDMSO vs WtDMSO')
+
+fdr <- res.MutGSKJ4.MutDMSO[which(res.MutGSKJ4.MutDMSO$padj>0.1 
+                                  & is.na(res.MutGSKJ4.MutDMSO$padj)==FALSE),]
+fdr <- fdr[which(fdr$padj==min(fdr$padj)),]$pvalue
+
+circ_ids <- rownames(res.MutGSKJ4.MutDMSO[which(
+  rownames(res.MutGSKJ4.MutDMSO) %in% mgi_condense.ensembl &
+    res.MutGSKJ4.MutDMSO$padj<0.1),])
+circ_names <- get.gene(circ_ids)$mgi_symbol
+
+makeVolcanoPlot(res.MutGSKJ4.MutDMSO, 
+                "none", fdr,
+                mgi_condense.ensembl, 
+                circ_ids, circ_names='', 
+                ylim=10, "magenta")
+title('MutGSKJ4 vs MutDMSO')
+```
+
+These plots label the known positive and negative regulators of the Bmp pathway, according to MGI. There does not seem to be a pattern in terms of directionality.
+```{r fig.width=12, echo=FALSE, results='hide',message=FALSE}
+pos.reg.ensembl <- get.ensembl(mgi_condense$Symbol[which(mgi_condense$Annotated.Term==
+                                       'positive regulation of BMP signaling pathway')])$gene_id
+neg.reg.ensembl <- get.ensembl(mgi_condense$Symbol[which(mgi_condense$Annotated.Term==
+                                       'negative regulation of BMP signaling pathway')])$gene_id
+pos.reg.ensembl <- pos.reg.ensembl[!(pos.reg.ensembl %in% neg.reg.ensembl)]
+neg.reg.ensembl <- neg.reg.ensembl[!(neg.reg.ensembl %in% pos.reg.ensembl)]
+
+fdr <- res.MutDMSO.WtDMSO[which(res.MutDMSO.WtDMSO$padj>0.1 
+                                  & is.na(res.MutDMSO.WtDMSO$padj)==FALSE),]
+fdr <- fdr[which(fdr$padj==min(fdr$padj)),]$pvalue
+
+circ_ids <- unique(rownames(res.MutDMSO.WtDMSO[which(
+  rownames(res.MutDMSO.WtDMSO) %in% c(pos.reg.ensembl, neg.reg.ensembl) &
+    res.MutDMSO.WtDMSO$padj<0.1),]))
+circ_names <- get.gene(circ_ids)$mgi_symbol
+
+# setEPS()
+# postscript(file='plots_final/volcano_Bmp-pos-neg-reg.eps', width=12, height=5)
+par(mfrow=c(1,2))
+makeVolcanoPlot2(res.MutDMSO.WtDMSO, 
+                "none", fdr,
+                pos.reg.ensembl, neg.reg.ensembl,
+                circ_ids, circ_names='', 
+                ylim=10, "red", "blue", "topright")
+title('MutDMSO vs WtDMSO')
+
+fdr <- res.MutGSKJ4.MutDMSO[which(res.MutGSKJ4.MutDMSO$padj>0.1 
+                                  & is.na(res.MutGSKJ4.MutDMSO$padj)==FALSE),]
+fdr <- fdr[which(fdr$padj==min(fdr$padj)),]$pvalue
+
+circ_ids <- unique(rownames(res.MutGSKJ4.MutDMSO[which(
+  rownames(res.MutGSKJ4.MutDMSO) %in% c(pos.reg.ensembl,neg.reg.ensembl) &
+    res.MutGSKJ4.MutDMSO$padj<0.1),]))
+circ_names <- get.gene(circ_ids)$mgi_symbol
+
+makeVolcanoPlot2(res.MutGSKJ4.MutDMSO, 
+                "none", fdr,
+                pos.reg.ensembl, neg.reg.ensembl, 
+                circ_ids, circ_names='', 
+                ylim=10, "red", "blue", "topleft")
+title('MutGSKJ4 vs MutDMSO')
+
+# dev.off()
+```
+
+Another way to look at it: this plot shows the log2FC in the MutGSKJ4 vs MutDMSO contrast compared to the MutDMSO vs WtDMSO contrast, specifically for MGI Bmp pathway genes. This does not take into account the significance of the log2FCs. It is expected that Bmp pathway genes which are upregulated in MutDMSO would be reversed in MutGSKJ4, and vice versa. This somewhat matches the scatterplot (<i>**The <b>green</b> line is the linear regression, whereas the <b>blue</b> is the identy line</i>). However, the Pearson correlation coefficient is quite low.
+```{r}
+mgi.bmp.shared.ensembl <- mgi_condense.ensembl[which(
+  mgi_condense.ensembl %in% rownames(res.MutDMSO.WtDMSO) &
+    mgi_condense.ensembl %in% rownames(res.MutGSKJ4.MutDMSO))]
+mgi.bmp.shared <- data.frame(log2FC.MutDMSO.WtDMSO=
+                               res.MutDMSO.WtDMSO[mgi.bmp.shared.ensembl,]$log2FoldChange,
+                             log2FC.MutGSKJ4.MutDMSO=
+                               res.MutGSKJ4.MutDMSO[mgi.bmp.shared.ensembl,]$log2FoldChange)
+
+lm(mgi.bmp.shared$log2FC.MutGSKJ4.MutDMSO ~ mgi.bmp.shared$log2FC.MutDMSO.WtDMSO)
+cor(mgi.bmp.shared$log2FC.MutGSKJ4.MutDMSO, mgi.bmp.shared$log2FC.MutDMSO.WtDMSO,
+    method='pearson')
+
+plot(mgi.bmp.shared$log2FC.MutDMSO.WtDMSO, mgi.bmp.shared$log2FC.MutGSKJ4.MutDMSO, 
+     pch=16, cex=0.75, col=alpha('gray50', 0.5),
+     xlab='log2FC, MutDMSO vs WtDMSO', ylab='log2FC, MutGSKJ4 vs MutDMSO',
+     main='MGI Bmp pathway')
+abline(h=0, lty=2, col='red')
+abline(v=0, lty=2, col='red')
+abline(a=0, b=-1, col='blue')
+abline(a=-0.09261, b=-0.45628, col='green')
+```

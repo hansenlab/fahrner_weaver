@@ -12,6 +12,14 @@ library(DESeq2)
 # tf_table_query <- getTable(query)
 # tf_table_query_EZH2 <- tf_table_query[which(tf_table_query$name=='EZH2'),]
 
+bed <- as.data.frame(read.table("wgEncodeRegTfbsClusteredWithCellsV3.bed",
+                                header = FALSE, sep="\t", stringsAsFactors=FALSE, quote=""))
+colnames(bed) <- c('chrom','chromStart','chromEnd','factor','score','cell')
+
+bed$sourceCount <- lengths(str_split(bed$cell, ','))
+bed_EZH2 <- bed[which(bed$factor=='EZH2'),]
+table(unlist(str_split(bed_EZH2$cell, ',')))
+
 # get GRanges of human EZH2 binding peaks
 tf_table <- read.csv(file='tf_table.csv')
 tf_table_EZH2 <- tf_table[which(tf_table$name=='EZH2'),]
@@ -73,13 +81,33 @@ save(mouse_EZH2_target_strong, file='mouse_EZH2_target_strong.rda')
 setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
 load(file='dds_final.rda')
 res <- results(dds)
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/EZH2_targets")
+load(file='mouse_EZH2_target_all.rda')
+load(file='mouse_EZH2_target_strong.rda')
+
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/EZH2_targets/plots")
+setEPS()
+postscript(file='221120_p-val-EZH2.eps')
 hist(res$pvalue[which(rownames(res) %in% mouse_EZH2_target_all)], 
      freq=FALSE, breaks=50,
      xlab='p-values (R684C/+ vs WT)',
      main='EZH2 target genes',
-     ylim=c(0,4.5))
+     ylim=c(0,4.5),
+     col='cornflowerblue',
+     cex.lab=1.5,
+     cex.axis=1.5,
+     cex.main=1.75)
+dev.off()
+
+setEPS()
+postscript(file='221120_p-val-non-EZH2.eps')
 hist(res$pvalue[!(rownames(res) %in% mouse_EZH2_target_all)], 
      freq=FALSE, breaks=50,
      xlab='p-values (R684C/+ vs WT)',
      main='non-EZH2 target genes',
-     ylim=c(0,4.5))
+     ylim=c(0,4.5),
+     col='gray60',
+     cex.lab=1.5,
+     cex.axis=1.5,
+     cex.main=1.75)
+dev.off()

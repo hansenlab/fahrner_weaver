@@ -1,0 +1,221 @@
+---
+title: "Fig4"
+author: "Christine Gao"
+date: "5/15/2023"
+output:
+  html_document:
+    code_folding: hide
+---
+```{r, include=FALSE}
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+library(tximport)
+library(DESeq2)
+library(sva)
+library(biomaRt)
+library(ggplot2)
+library(ggrepel)
+library(tximeta)
+library(SummarizedExperiment)
+library(edgeR)
+library(limma)
+library(statmod)
+library(tidyverse)
+library(tripack)
+library(EnsDb.Mmusculus.v79)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(dplyr)
+library(scales)
+```
+
+Function for making Wilcoxon rank sum test stat histograms FOR PAPER FIGURES.
+```{r}
+wilcox.hist.figure <- function(permutation, rank, pval, title, color){
+  par(mar=c(1.6,1,0,0), mgp=c(0.5,0.075,0))
+  hist(permutation, col = "gray60", lty = 0, 
+       breaks = 100, freq = FALSE, xlab = '', ylab='', yaxt = 'n',
+       main = '',
+       cex.main = 1.2, font.main = 1, 
+       xlim = c(rank-50000, max(permutation)+0.05), xaxt = 'n')
+  axis(1, at = c(round(quantile(permutation, c(0.01, 0.99)))), tck=-0.02, cex.axis = 0.7)
+  axis(2, at = c(0, 0.000007), tck=-0.02, cex.axis = 0.7)
+  mtext('Wilcoxon test stat', side=1, line=0.7, cex=0.7)
+  mtext('Density', side=2, line=0.3, adj=0.4, cex=0.7)
+  abline(v = rank, col = color, lwd = 2.5)
+  text(rank+10000, 0.000006,paste('p =', pval), adj=0, col = 'black', cex=0.7)
+  text(rank+10000, 0.0000069,'BMP genes', adj=0, col = 'black', cex=0.7)
+}
+```
+
+Function for making volcano plots FOR PAPER FIGURES.
+```{r}
+makeVolcanoPlot.figure <- 
+  function(DEgenes_df, lfc_cutoff, fdr, gene_ids, circ_ids, circ_names, ylim, color){
+  tab = data.frame(logFC = DEgenes_df$log2FoldChange, negLogPval = -log10(DEgenes_df$pvalue))
+  rownames(tab) <- rownames(DEgenes_df)
+  par(mar=c(1.4,1.3,1,0), mgp=c(0.5,0,0))
+  plot(tab[-which(rownames(tab) %in% gene_ids), ], pch = 19, cex = 0.25, 
+       xlab='',
+       ylab='',
+       axes = FALSE,
+       col = "gray60", bty = 'l', 
+       xlim = c(-4, max(tab$logFC)), 
+       ylim = c(0, ylim))
+  points(tab[gene_ids, ], pch = 19, cex = 0.3, col = color)
+  points(tab[circ_ids, ], pch = 1, cex = 1, col = 'black')
+  
+  axis(1, seq(-6,2, by=2), tck=-0.02, cex.axis=0.7)
+  axis(2, seq(0,10, by=2), tck=-0.02, cex.axis=0.7)
+  mtext(expression(log[2]~fold~change), side=1, line=0.6, cex=0.7)
+  mtext(expression(-log[10]~pvalue), side=2, line=0.6, cex=0.7)
+
+  text(tab[circ_ids, ]$logFC-0.2, tab[circ_ids, ]$negLogPval, adj=1, cex = 0.6, col='black',font=3,
+       labels=circ_names)
+ 
+  abline(h=-log10(fdr), col='red', lty=2, lwd=1)
+  mtext('R684C/+ vs +/+', side=3, cex=0.7)
+}
+```
+
+Function for retrieving gene names, given a vector of Ensembl IDs. Returns a dataframe containing both Ensembl IDs and corresponding genes. <i>**Leaves out Ensembl IDs for which a gene name could not be found.</i>
+```{r}
+get.gene <- function(x){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol'),
+               filters='ensembl_gene_id',
+               values=x,
+               mart=ensembl102.mmusculus)
+  genes <- data.frame(ensembl_gene_id=x)
+  genes <- merge(genes, mgi, by='ensembl_gene_id')
+  return(genes)
+}
+```
+
+<b>Fig 4A</b>
+```{r}
+load(file='BigStuff/dds.coll.filtered_untreated.rda')
+
+plot <- plotPCA(vst(dds.coll.filtered), returnData=TRUE)
+
+plot$group <- relevel(plot$group, ref='WT')
+group.colors <- c('#0F80FF','#FB0207')
+# setEPS()
+# postscript('plots_final/pca_untreated.eps', width=2.15, height=1.57)
+ggplot(data = plot, aes(x = PC1, y = PC2, color=group)) + 
+  geom_point(size = 2) + 
+  scale_color_manual(labels=c('+/+','R684C/+'), values=group.colors) + 
+  xlab('PC1: 75% variance') +
+  ylab('PC2: 14% variance') +
+  theme_bw(base_size=8) +
+  theme(axis.text=element_text(size=8, color='black'),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color='black',
+                                    fill=NA,
+                                    size=1),
+        legend.position = 'none')
+# dev.off()
+```
+
+<b>Fig 4B</b>
+```{r}
+load(file='BigStuff/dds_final.rda')
+res <- results(dds)
+
+# setEPS()
+# postscript(file='plots_final/density_pval-untreated.eps', width=2.1, height=1.7)
+par(mar=c(1.35,1.1,0.5,0), mgp=c(0.5,0.075,0))
+plot(density(res$pvalue, from=0.01,to=0.97, bw=0.025), 
+     asp=1, lwd=2, main='', bty='n', yaxt='n', xaxt='n', ylab='', xlab='')
+axis(1, at=c(0,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(.75,1.45), tck=-0.02, cex.axis=0.7, pos=-0.02)
+mtext('p-values', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+# dev.off()
+```
+
+<b>Fig 4C</b>
+```{r}
+load(file='mgi_ost.condense.ensembl.rda')
+load(file='permutation_rank_ost_MGI.rda')
+
+pathway <- mgi_ost.condense.ensembl$gene_id
+rank_ost <- wilcox.test(res$pvalue[which(rownames(res) %in% pathway)], 
+                        res$pvalue[-which(rownames(res) %in% pathway)])$statistic
+pval.ost <- unname(prop.table(table(permutation_rank_ost<rank_ost))[2])
+
+# setEPS()
+# postscript('plots_final/wilcox_ost_untreated.eps', width=1.96, height=1.96)
+wilcox.hist.figure(permutation_rank_ost, 
+                   rank_ost, 
+                   pval.ost, 
+                   'MGI osteoblast differentiation', 
+                   'deepskyblue')
+# dev.off()
+```
+
+<b>Fig 4D</b>
+```{r}
+# circ_ids <- rownames(res[which(rownames(res) %in% mgi_ost.condense.ensembl$gene_id &
+#                                  res$padj<0.1),])
+# circ_names <- get.gene(circ_ids)$mgi_symbol
+
+circ_ids <- c('ENSMUSG00000039153','ENSMUSG00000021540','ENSMUSG00000060284')
+circ_names <- get.gene(circ_ids)
+
+setEPS()
+postscript('plots_final/volcano_ost_untreated.eps', width=1.96, height=1.96)
+makeVolcanoPlot.figure(res, 
+                "none", fdr=0.00139149,
+                mgi_ost.condense.ensembl$gene_id, 
+                circ_names$ensembl_gene_id, circ_names$mgi_symbol, 
+                ylim=10, "deepskyblue")
+dev.off()
+```
+
+<b>Fig 4E</b>
+```{r}
+load(file='mgi_condense.ensembl.rda')
+load(file='permutation_rank_Bmp2_MGI.rda')
+
+pathway <- mgi_condense.ensembl
+rank_bmp <- wilcox.test(res$pvalue[which(rownames(res) %in% pathway)],
+                        res$pvalue[-which(rownames(res) %in% pathway)])$statistic
+pval.bmp <- unname(prop.table(table(permutation_rank_Bmp2<rank_bmp))[2])
+
+# setEPS()
+# postscript('plots_final/wilcox_BMP_untreated.eps', width=1.96, height=1.96)
+wilcox.hist.figure(permutation_rank_Bmp2, 
+                   rank_bmp, 
+                   pval.bmp, 
+                   'MGI BMP signaling pathway', 
+                   'magenta')
+# dev.off()
+```
+
+<b>Fig 4F</b>
+```{r}
+circ_ids <- rownames(res[which(rownames(res) %in% mgi_condense.ensembl &
+                                 res$padj<0.1),])
+circ_names <- get.gene(circ_ids)
+
+setEPS()
+postscript('plots_final/volcano_Bmp_untreated.eps', width=1.96, height=1.96)
+makeVolcanoPlot.figure(res, 
+                "none", fdr=0.00139149,
+                mgi_condense.ensembl, 
+                circ_names$ensembl_gene_id, circ_names$mgi_symbol, 
+                ylim=10, "magenta")
+dev.off()
+```
+
+<b>Supp Fig 4A,</b>
+```{r}
+setEPS()
+postscript('plots_final/volcano_sig_untreated.eps', width=1.96, height=1.96)
+makeVolcanoPlot.figure(res, 
+                "none", fdr=0.00139149,
+                rownames(res[which(res$padj<0.1),]), 
+                circ_ids='', circ_names='', 
+                ylim=10, "orange")
+dev.off()
+```
