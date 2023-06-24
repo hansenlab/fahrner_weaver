@@ -1,0 +1,182 @@
+---
+title: "RNAseq_analysis-EZH2"
+author: "Christine Gao"
+date: "5/4/2023"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r, include=FALSE}
+library(rtracklayer)
+library(EnsDb.Hsapiens.v75)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(biomaRt)
+library(DESeq2)
+library(stringr)
+library(dplyr)
+```
+
+
+Function for retrieving gene names, given a vector of Ensembl IDs. Returns a dataframe containing both Ensembl IDs and corresponding genes. <i>**Leaves out Ensembl IDs for which a gene name could not be found.</i>
+```{r}
+get.gene <- function(x){
+  ensembl102.mmusculus <- useEnsembl(biomart='genes', dataset='mmusculus_gene_ensembl', version=102)
+  mgi <- getBM(attributes=c('ensembl_gene_id','mgi_symbol'),
+               filters='ensembl_gene_id',
+               values=x,
+               mart=ensembl102.mmusculus)
+  genes <- data.frame(ensembl_gene_id=x)
+  genes <- merge(genes, mgi, by='ensembl_gene_id')
+  return(genes)
+}
+```
+
+Function for retrieving homologous mouse Ensembl IDs, given a vector of human Ensembl IDs. Returns a dataframe of matching mouse and human Ensembl IDs. Leaves out human Ensembl IDs for which a mouse homolog could not be found.
+```{r}
+get.mouseHomolog <- function(human.EnsemblID){
+  human <- useMart('ensembl', dataset='hsapiens_gene_ensembl')
+  searchAttributes(human, pattern='mmusculus')
+  human.mouse.homologs <- getBM(attributes = c("ensembl_gene_id", "external_gene_name",
+                                               "mmusculus_homolog_ensembl_gene", 
+                                               "mmusculus_homolog_associated_gene_name", 
+                                               "mmusculus_homolog_orthology_confidence", 
+                                               "mmusculus_homolog_perc_id_r1"),
+                                filters = "ensembl_gene_id",
+                                values = human.EnsemblID,
+                                mart = human)
+  human.mouse.homologs <- human.mouse.homologs[
+    which(human.mouse.homologs$mmusculus_homolog_orthology_confidence==1),]
+  mouse.EnsemblID <- data.frame(mouse=human.mouse.homologs$mmusculus_homolog_ensembl_gene,
+                                human=human.mouse.homologs$ensembl_gene_id)
+  return(mouse.EnsemblID)
+}
+```
+
+Use data from ENCODE Txn Factor ChIP track, downloaded from UCSC: http://hgdownload.soe.ucsc.edu/goldenPath/hg19/encodeDCC/wgEncodeRegTfbsClustered/
+<br>
+Identify EZH2 binding sites across human cell lines and create hg19 GRanges object.
+```{r class.source='fold-show'}
+bed <- as.data.frame(read.table('wgEncodeRegTfbsClusteredWithCellsV3.bed',
+                                header = FALSE, sep="\t", stringsAsFactors=FALSE, quote=""))
+colnames(bed) <- c('chrom','chromStart','chromEnd','factor','score','cell')
+
+bed$sourceCount <- lengths(str_split(bed$cell, ',')) # number of cell lines with peaks
+bed_EZH2 <- bed[which(bed$factor=='EZH2'),]
+table(unlist(str_split(bed_EZH2$cell, ','))) # total number of EZH2 peaks per cell line
+
+GRanges.hg19.EZH2 <- makeGRangesFromDataFrame(bed_EZH2, keep.extra.columns=TRUE)
+genome(GRanges.hg19.EZH2) <- 'hg19'
+save(GRanges.hg19.EZH2, file='GRanges.hg19.EZH2.rda')
+```
+
+<br>
+Stratify EZH2 peak GRanges by level of evidence (number of cell lines with concordant peaks).
+```{r class.source='fold-show'}
+EZH2.all <- GRanges.hg19.EZH2
+EZH2.mod <- GRanges.hg19.EZH2[which(GRanges.hg19.EZH2$sourceCount >= 2)]
+EZH2.strong <- GRanges.hg19.EZH2[which(GRanges.hg19.EZH2$sourceCount >= 5)]
+```
+
+<br>
+Obtain GRanges of all hg19 gene promoters.
+```{r class.source='fold-show'}
+edb <- EnsDb.Hsapiens.v75
+prom.all <- promoters(edb, upstream=2000, downstream=2000,
+                       columns = c("gene_name", "tx_id", "tx_cds_seq_start", "tx_cds_seq_end",
+                                   "tx_biotype", "gene_id"))
+genome(seqinfo(prom.all)) <- 'hg19'
+seqlevelsStyle(prom.all) <- 'ucsc'
+prom.all <- prom.all[which(seqnames(prom.all) %in% names(Hsapiens)[1:24])]
+```
+
+<br>
+Find overlaps between EZH2 peaks and hg19 gene promoters. For each hg19 promoter hit, keep the max EZH2 peak score and corresponding number of cell line sources.
+```{r}
+human.target.all <- data.frame(human=prom.all$gene_id[queryHits(findOverlaps(prom.all, EZH2.all))],
+                               EZH2.score=EZH2.all$score[subjectHits(findOverlaps(prom.all, EZH2.all))],
+                               sources=EZH2.all$sourceCount[
+                                 subjectHits(findOverlaps(prom.all, EZH2.all))])
+human.target.all <- data.frame(human.target.all %>% 
+                                 group_by(human) %>% 
+                                 slice_max(EZH2.score, with_ties = FALSE))
+
+human.target.mod <- data.frame(human=prom.all$gene_id[queryHits(findOverlaps(prom.all, EZH2.mod))],
+                               EZH2.score=EZH2.mod$score[subjectHits(findOverlaps(prom.all, EZH2.mod))],
+                               sources=EZH2.mod$sourceCount[
+                                 subjectHits(findOverlaps(prom.all, EZH2.mod))])
+human.target.mod <- data.frame(human.target.mod %>% 
+                                 group_by(human) %>% 
+                                 slice_max(EZH2.score, with_ties = FALSE))
+
+human.target.strong <- data.frame(human=
+                                    prom.all$gene_id[queryHits(findOverlaps(prom.all, EZH2.strong))],
+                                  EZH2.score=
+                                    EZH2.strong$score[subjectHits(findOverlaps(prom.all, EZH2.strong))],
+                                  sources=EZH2.strong$sourceCount[
+                                    subjectHits(findOverlaps(prom.all, EZH2.strong))])
+human.target.strong <- data.frame(human.target.strong %>%
+                                    group_by(human) %>%
+                                    slice_max(EZH2.score, with_ties = FALSE))
+```
+
+<br>
+Get mouse homologs for hg19 promoter hits.
+```{r class.source='fold-show'}
+mouse.target.all <- get.mouseHomolog(human.target.all$human)
+mouse.target.all <- merge(mouse.target.all, human.target.all, by='human', all=FALSE)
+
+mouse.target.mod <- get.mouseHomolog(human.target.mod$human)
+mouse.target.mod <- merge(mouse.target.mod, human.target.mod, by='human', all=FALSE)
+
+mouse.target.strong <- get.mouseHomolog(human.target.strong$human)
+mouse.target.strong <- merge(mouse.target.strong, human.target.strong, by='human', all=FALSE)
+head(mouse.target.strong)
+```
+
+<br>
+Load ost and bmp genes of interest. Merge with mouse homologs of hg19 EZH2 target promoters.
+```{r}
+ost <- read.csv('ost-list.csv')
+ost <- ost[,-1]
+colnames(ost)[1] <- 'mouse'
+ost.EZH2 <- merge(ost, mouse.target.all, by='mouse')
+ost.EZH2[order(-ost.EZH2$EZH2.score, -ost.EZH2$log2FC.MutDMSO.WtDMSO),
+         !(names(ost.EZH2) %in% c('mouse','human'))]
+
+bmp <- read.csv('bmp-list.csv')
+bmp <- bmp[,-1]
+colnames(bmp)[1] <- 'mouse'
+bmp.EZH2 <- merge(bmp, mouse.target.all, by='mouse')
+bmp.EZH2[order(-bmp.EZH2$EZH2.score, -bmp.EZH2$log2FC.MutDMSO.WtDMSO),
+         !(names(bmp.EZH2) %in% c('mouse','human'))]
+```
+
+<br>
+Load untreated D14 RNAseq.
+```{r class.source='fold-show'}
+setwd("~/Desktop/temp/Fahrner lab/Data/Weaver/fahrner_weaver/RNAseq/final_analysis/BigStuff")
+load(file='dds_final.rda')
+res <- results(dds)
+```
+
+<br>
+Plot conditional histograms for EZH2 target genes and non-EZH2 target genes.
+```{r fig.width=12}
+setEPS()
+postscript(file='density_cond-D14-EZH2.eps', width=2.36, height=1.77)
+par(mar=c(1.35,1.1,0.5,0), mgp=c(0.5,0.075,0))
+plot(density(res$pvalue[which(rownames(res) %in% mouse.target.all$mouse)], from=0.01,to=0.97, bw=0.025),
+     asp=NA, lwd=2, col='orange', main='', bty='n', yaxt='n', xaxt='n', ylab='', xlab='')
+lines(density(res$pvalue[!(rownames(res) %in% mouse.target.all$mouse)], 
+             from=0.01,to=0.97, bw=0.025),
+     lwd=2, col='black')
+axis(1, at=c(0,1), tck=-0.02, cex.axis=0.7)
+axis(2, at=c(.6,2.1), tck=-0.02, cex.axis=0.7, pos=-0.02)
+mtext('p-values, D14', side=1, line=0.3, cex=0.7)
+mtext('Density', side=2, line=0.3, cex=0.7)
+legend('topright', legend=c('EZH2 non-target', 'EZH2 target'),
+       col=c("black", "orange"), lty=c(1,1), lwd=2, cex=0.7,
+       box.lty=0)
+dev.off()
+```
